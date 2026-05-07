@@ -400,21 +400,3 @@ OmniBioAI Dev Hub is a:
 ✔ React-based visualization platform
 ✔ Foundation for autonomous scientific agents
 
----
-
-If you want next upgrade, I can help you build:
-
-### 🔥 “RAG Debug Console”
-
-* shows retrieval path step-by-step
-* graph nodes activated per query
-* token-level reasoning trace
-
-or
-
-### 🔥 “Autonomous Agent V4”
-
-* planning loop
-* tool selection
-* memory-driven reasoning
-
