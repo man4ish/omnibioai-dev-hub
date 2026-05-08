@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 # =========================================================
 # OLLAMA CONFIG
 # =========================================================
-OLLAMA_URL = "http://localhost:11434/api"
+OLLAMA_URL = "http://ollama:11434/api"
 EMBED_DIM = 768
 
 

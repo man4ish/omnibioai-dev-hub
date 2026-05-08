@@ -4,29 +4,105 @@ import { ragQuery } from "../api/client";
 export default function SearchPage() {
   const [q, setQ] = useState("");
   const [result, setResult] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
 
   const search = async () => {
-    const res = await ragQuery(q);
-    setResult(res.data);
+    if (!q.trim()) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await ragQuery(q);
+      setResult(res);
+    } catch (e) {
+      setResult({ error: String(e) });
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") search();
+  };
+
+  const contexts: any[] = result?.context || [];
+
   return (
-    <div className="card">
-      <h2>Vector Search</h2>
+    <>
+      <div className="page-header">
+        <div className="page-title">Vector Search</div>
+        <div className="page-sub">Semantic search across 1.2M embeddings · FAISS IndexFlatIP</div>
+      </div>
 
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Search embeddings..."
-      />
+      <div className="search-bar-row">
+        <input
+          className="search-input"
+          placeholder="Search embeddings... e.g. 'CRISPR delivery mechanisms'"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onKey}
+        />
+        <button className="btn-primary" onClick={search} disabled={loading}>
+          {loading ? <><span className="spinner" />Searching</> : "Search"}
+        </button>
+      </div>
 
-      <button onClick={search}>Search</button>
-
-      {result && (
-        <pre className="output">
-          {JSON.stringify(result.context, null, 2)}
-        </pre>
+      {result && !result.error && (
+        <div className="surface" style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 16, fontSize: 12, fontFamily: "var(--mono)", color: "var(--text-secondary)" }}>
+            <span>Query: <span style={{ color: "var(--teal)" }}>{result.query}</span></span>
+            {result.context_used && <span>Context chunks: <span style={{ color: "var(--text-primary)" }}>{result.context_used}</span></span>}
+            {result.version && <span>Engine: <span style={{ color: "var(--text-primary)" }}>{result.version}</span></span>}
+          </div>
+        </div>
       )}
-    </div>
+
+      {result?.answer && (
+        <div className="surface" style={{ marginBottom: 12 }}>
+          <div className="section-header" style={{ marginBottom: 8 }}>
+            <div className="section-title">Generated Answer</div>
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+            {result.answer}
+          </div>
+        </div>
+      )}
+
+      {contexts.length > 0 && (
+        <div>
+          <div className="section-header">
+            <div className="section-title">Retrieved Chunks ({contexts.length})</div>
+          </div>
+          {contexts.map((ctx: any, i: number) => (
+            <div key={i} className="result-card">
+              <div className="result-source">
+                {ctx.source || ctx.file || `chunk_${i + 1}`}
+              </div>
+              <div className="result-text">
+                {typeof ctx === "string" ? ctx : ctx.text || ctx.content || JSON.stringify(ctx)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {result?.error && (
+        <div className="result-card" style={{ borderLeftColor: "var(--red)" }}>
+          <div className="result-source" style={{ color: "var(--red)" }}>Error</div>
+          <div className="result-text">{result.error}</div>
+        </div>
+      )}
+
+      {!result && !loading && (
+        <div className="surface" style={{ textAlign: "center", padding: "40px 20px" }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⌕</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: 14 }}>
+            Enter a query to search across your indexed documents
+          </div>
+          <div style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 6, fontFamily: "var(--mono)" }}>
+            768-dimensional FAISS vector search · nomic-embed-text
+          </div>
+        </div>
+      )}
+    </>
   );
 }

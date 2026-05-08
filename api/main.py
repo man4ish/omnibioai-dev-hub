@@ -61,16 +61,16 @@ indexing_status = {
 # =========================================================
 
 REPOS = [
-    "../omnibioai",
-    "../omnibioai-rag",
-    "../omnibioai-toolserver",
-    "../omnibioai-tool-runtime",
-    "../omnibioai-workflow-bundles",
-    "../omnibioai-model-registry",
-    "../omnibioai-control-center",
-    "../omnibioai-sdk",
-    "../omnibioai-dev-docker",
-    "../omnibioai-lims"
+    "/workspace/omnibioai",
+    "/workspace/omnibioai-rag",
+    "/workspace/omnibioai-toolserver",
+    "/workspace/omnibioai-tool-runtime",
+    "/workspace/omnibioai-workflow-bundles",
+    "/workspace/omnibioai-model-registry",
+    "/workspace/omnibioai-control-center",
+    "/workspace/omnibioai_sdk",
+    "/workspace/omnibioai-dev-docker",
+    "/workspace/omnibioai-lims"
 ]
 
 
