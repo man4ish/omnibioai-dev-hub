@@ -1,32 +1,27 @@
-import React, { useState } from "react";
-import { useRagStream } from "../../hooks/useRagStream";
+import { useState } from "react";
+import { streamRAG } from "../../hooks/useRagStream";
+import { useAppStore } from "../../store/appStore";
 
 export default function ChatPanel() {
   const [input, setInput] = useState("");
-  const { answer, run, loading } = useRagStream();
+  const answer = useAppStore((s) => s.answer);
+
+  const send = async () => {
+    await streamRAG(input);
+  };
 
   return (
-    <div className="flex flex-col h-full p-3">
-      
-      <div className="flex-1 border p-2 overflow-auto">
-        <div className="text-sm whitespace-pre-wrap">{answer}</div>
+    <div>
+      <div style={{ height: 300, overflow: "auto" }}>
+        {answer}
       </div>
 
-      <div className="mt-2 flex">
-        <input
-          className="border flex-1 p-2"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+      />
 
-        <button
-          className="bg-blue-600 text-white px-3 ml-2"
-          onClick={() => run(input)}
-        >
-          {loading ? "Streaming..." : "Send"}
-        </button>
-      </div>
-
+      <button onClick={send}>Send</button>
     </div>
   );
 }

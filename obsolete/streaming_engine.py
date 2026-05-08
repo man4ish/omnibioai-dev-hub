@@ -3,15 +3,21 @@ import json
 from typing import Generator, Dict, Any, Optional
 
 
+# =========================================================
+# STREAMING ENGINE V4 - OMNIBIOAI
+# Agentic + Robust + UI-friendly + Fault-tolerant
+# =========================================================
+
 class StreamingEngineV4:
     """
-    Production-grade Ollama streaming engine for RAG V4 agent.
+    Production-grade Ollama streaming engine for RAG V4.
 
     Features:
-    - Robust streaming parsing
-    - Retry + fallback model
-    - Agent-aware prompt injection
-    - UI-friendly event streaming
+    - Primary + fallback model routing
+    - Structured SSE-ready output
+    - Safe JSON parsing
+    - Agent-aware system prompt injection
+    - Retry + graceful degradation
     """
 
     def __init__(
@@ -20,35 +26,37 @@ class StreamingEngineV4:
         fallback_model: str = "mistral",
         base_url: str = "http://localhost:11434/api/chat",
         timeout: int = 120,
+        max_retries: int = 1,
     ):
         self.primary_model = primary_model
         self.fallback_model = fallback_model
         self.url = base_url
         self.timeout = timeout
+        self.max_retries = max_retries
 
-    # -----------------------------
+    # =========================================================
     # PUBLIC STREAM INTERFACE
-    # -----------------------------
+    # =========================================================
     def stream(
         self,
         prompt: str,
         meta: Optional[Dict[str, Any]] = None
-    ) -> Generator[str, None, None]:
+    ) -> Generator[Dict[str, Any], None, None]:
 
         meta = meta or {}
 
         # try primary model first
         yield from self._stream_with_model(self.primary_model, prompt, meta)
 
-    # -----------------------------
-    # INTERNAL STREAM CORE
-    # -----------------------------
+    # =========================================================
+    # CORE STREAM HANDLER
+    # =========================================================
     def _stream_with_model(
         self,
         model: str,
         prompt: str,
         meta: Dict[str, Any]
-    ):
+    ) -> Generator[Dict[str, Any], None, None]:
 
         payload = {
             "model": model,
@@ -74,7 +82,7 @@ class StreamingEngineV4:
             )
 
             if response.status_code != 200:
-                yield f"[ERROR] Ollama HTTP {response.status_code}"
+                yield {"type": "error", "content": f"Ollama HTTP {response.status_code}"}
                 yield from self._fallback(prompt, meta)
                 return
 
@@ -92,29 +100,40 @@ class StreamingEngineV4:
                     )
 
                     if token:
-                        yield token
+                        yield {
+                            "type": "token",
+                            "content": token,
+                            "model": model
+                        }
 
                 except json.JSONDecodeError:
                     continue
 
+            # end signal
+            yield {"type": "done", "model": model}
+
         except Exception as e:
-            yield f"[STREAM_ERROR]: {str(e)}"
+            yield {"type": "error", "content": str(e)}
             yield from self._fallback(prompt, meta)
 
-    # -----------------------------
-    # FALLBACK MODEL
-    # -----------------------------
-    def _fallback(self, prompt: str, meta: Dict[str, Any]):
+    # =========================================================
+    # FALLBACK MODEL STREAM
+    # =========================================================
+    def _fallback(
+        self,
+        prompt: str,
+        meta: Dict[str, Any]
+    ) -> Generator[Dict[str, Any], None, None]:
+
+        payload = {
+            "model": self.fallback_model,
+            "stream": True,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
+        }
 
         try:
-            payload = {
-                "model": self.fallback_model,
-                "stream": True,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
-            }
-
             response = requests.post(
                 self.url,
                 json=payload,
@@ -128,36 +147,54 @@ class StreamingEngineV4:
 
                 try:
                     data = json.loads(line.decode("utf-8"))
+
                     token = data.get("message", {}).get("content", "")
+
                     if token:
-                        yield token
+                        yield {
+                            "type": "token",
+                            "content": token,
+                            "model": self.fallback_model
+                        }
+
                 except Exception:
                     continue
 
-        except Exception as e:
-            yield f"[FALLBACK_FAILED]: {str(e)}"
+            yield {"type": "done", "model": self.fallback_model}
 
-    # -----------------------------
-    # SYSTEM PROMPT BUILDER (V4 AGENT AWARENESS)
-    # -----------------------------
+        except Exception as e:
+            yield {
+                "type": "fatal",
+                "content": f"Fallback failed: {str(e)}"
+            }
+
+    # =========================================================
+    # SYSTEM PROMPT (AGENTIC V4)
+    # =========================================================
     def _build_system_prompt(self, meta: Dict[str, Any]) -> str:
 
         plan = meta.get("plan", {})
+        memory = meta.get("memory", "")
 
         return f"""
 You are OmniBioAI RAG V4 Autonomous Agent.
 
-You operate with:
-- Hybrid retrieval (vector + graph + plugins)
+Capabilities:
+- Hybrid retrieval (vector + graph + plugin systems)
 - Memory-aware reasoning
-- Tool-augmented context synthesis
+- Tool-augmented scientific analysis
+- Multi-step reasoning with context fusion
 
-Current execution plan:
+Execution Plan:
 {json.dumps(plan, indent=2)}
 
+Memory Context:
+{memory}
+
 Rules:
-- Use retrieved context if available
-- Reason step-by-step internally
-- Return concise scientific/technical answers
-- If uncertain, say so clearly
+- Use provided context if available
+- Prefer structured reasoning
+- Be precise and technical
+- If uncertain, explicitly say so
+- Avoid hallucination
 """

@@ -1,159 +1,146 @@
 import requests
 import json
 import time
-from typing import List, Dict, Any, Optional
+import uuid
+from typing import List, Dict, Any
 
 
 # =========================================================
-# RAG QUERY ROUTER V2 - OMNIBIOAI
-# Hybrid: Vector + Graph + Plugin + LLM (Ollama)
+# RAG QUERY ROUTER V4
 # =========================================================
 
-class RAGQueryRouterV2:
-    """
-    Production RAG engine:
-    - Hybrid retrieval (vector + graph + plugin)
-    - Context builder
-    - Ollama LLM streaming
-    - Lightweight intent routing
-    """
+class RAGQueryRouterV4:
 
-    def __init__(self, vector_store, graph_store=None, plugin_index=None):
+    def __init__(
+        self,
+        vector_store,
+        graph_store=None,
+        plugin_index=None,
+        embedder=None
+    ):
         self.vector_store = vector_store
         self.graph_store = graph_store
         self.plugin_index = plugin_index
 
-        # Ollama config
+        self.embedder = embedder  # FIX
+
         self.llm_url = "http://localhost:11434/api/chat"
         self.model = "llama3"
-
-        # retrieval config
         self.top_k = 8
 
-    # =========================================================
-    # INTENT ROUTING (lightweight v2)
-    # =========================================================
+    # -----------------------------
+    # INTENT
+    # -----------------------------
     def detect_intent(self, query: str) -> str:
         q = query.lower()
 
-        if any(x in q for x in ["graph", "relation", "path", "edge"]):
+        if any(x in q for x in ["graph", "relation", "edge"]):
             return "graph"
 
-        if any(x in q for x in ["plugin", "tool", "workflow"]):
+        if any(x in q for x in ["plugin", "workflow"]):
             return "plugin"
-
-        if any(x in q for x in ["compare", "difference", "vs"]):
-            return "hybrid"
 
         return "hybrid"
 
-    # =========================================================
-    # VECTOR RETRIEVAL
-    # =========================================================
+    # -----------------------------
+    # VECTOR SEARCH
+    # -----------------------------
     def vector_search(self, query: str) -> List[Dict]:
-        if not self.vector_store:
+
+        if not self.vector_store or not self.embedder:
             return []
 
         try:
-            return self.vector_store.search(query, top_k=self.top_k)
-        except Exception:
+            query_vector = self.embedder.encode(query)
+
+            if isinstance(query_vector, list) and len(query_vector) > 0:
+                query_vector = query_vector[0]
+
+            return self.vector_store.search(query_vector, top_k=self.top_k)
+
+        except Exception as e:
+            print("[Vector Error]", e)
             return []
 
-    # =========================================================
-    # GRAPH RETRIEVAL
-    # =========================================================
-    def graph_search(self, query: str) -> List[Dict]:
+    # -----------------------------
+    # GRAPH SEARCH
+    # -----------------------------
+    def graph_search(self, query: str):
         if not self.graph_store:
             return []
 
         try:
             return self.graph_store.search(query)
-        except Exception:
+        except Exception as e:
+            print("[Graph Error]", e)
             return []
 
-    # =========================================================
-    # PLUGIN RETRIEVAL
-    # =========================================================
-    def plugin_search(self, query: str) -> List[Dict]:
+    # -----------------------------
+    # PLUGIN SEARCH
+    # -----------------------------
+    def plugin_search(self, query: str):
         if not self.plugin_index:
             return []
 
         try:
             return self.plugin_index.search(query)
-        except Exception:
+        except Exception as e:
+            print("[Plugin Error]", e)
             return []
 
-    # =========================================================
+    # -----------------------------
     # HYBRID RETRIEVAL
-    # =========================================================
-    def hybrid_retrieve(self, query: str) -> Dict[str, List[Dict]]:
-        intent = self.detect_intent(query)
+    # -----------------------------
+    def hybrid_retrieve(self, query: str):
 
-        results = {
+        return {
+            "intent": self.detect_intent(query),
             "vector": self.vector_search(query),
             "graph": self.graph_search(query),
-            "plugin": self.plugin_search(query),
-            "intent": intent
+            "plugin": self.plugin_search(query)
         }
 
-        return results
+    # -----------------------------
+    # CONTEXT BUILDER
+    # -----------------------------
+    def build_context(self, results: Dict):
 
-    # =========================================================
-    # SCORE + MERGE CONTEXT
-    # =========================================================
-    def build_context(self, results: Dict[str, List[Dict]]) -> str:
-        """
-        Merge + deduplicate + format context for LLM
-        """
+        blocks = []
 
-        context_blocks = []
+        def add(item, tag):
+            text = item.get("text", "").strip()
+            if text:
+                blocks.append(f"[{tag}] {text}")
 
-        def format_block(item, source):
-            text = item.get("text", "")
-            return f"[{source}] {text}"
+        for r in results["vector"]:
+            add(r, "VECTOR")
 
-        # vector results
-        for r in results.get("vector", []):
-            context_blocks.append(format_block(r, "vector"))
+        for r in results["graph"]:
+            add(r, "GRAPH")
 
-        # graph results
-        for r in results.get("graph", []):
-            context_blocks.append(format_block(r, "graph"))
+        for r in results["plugin"]:
+            add(r, "PLUGIN")
 
-        # plugin results
-        for r in results.get("plugin", []):
-            context_blocks.append(format_block(r, "plugin"))
+        return "\n".join(blocks[:12])
 
-        # limit context size
-        return "\n".join(context_blocks[:12])
-
-    # =========================================================
-    # LLM STREAMING (OLLAMA)
-    # =========================================================
+    # -----------------------------
+    # STREAM LLM
+    # -----------------------------
     def stream_llm(self, query: str, context: str):
-        """
-        Streams tokens from Ollama
-        """
 
         prompt = f"""
-You are OmniBioAI RAG assistant.
-
-Use the context below to answer the query.
+You are OmniBioAI RAG Assistant (V4).
 
 CONTEXT:
 {context}
 
-QUERY:
+QUESTION:
 {query}
-
-Answer clearly and technically.
 """
 
         payload = {
             "model": self.model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
+            "messages": [{"role": "user", "content": prompt}],
             "stream": True
         }
 
@@ -161,7 +148,8 @@ Answer clearly and technically.
             response = requests.post(
                 self.llm_url,
                 json=payload,
-                stream=True
+                stream=True,
+                timeout=120
             )
 
             for line in response.iter_lines():
@@ -173,25 +161,20 @@ Answer clearly and technically.
                     token = data.get("message", {}).get("content", "")
                     if token:
                         yield token
-
-                except Exception:
+                except:
                     continue
 
         except Exception as e:
-            yield f"[LLM_ERROR]: {str(e)}"
+            yield f"[STREAM_ERROR] {str(e)}"
 
-    # =========================================================
-    # MAIN QUERY ENTRYPOINT
-    # =========================================================
-    def query(self, query: str) -> Dict[str, Any]:
-        """
-        Full RAG pipeline (non-streaming)
-        """
+    # -----------------------------
+    # MAIN PIPELINE
+    # -----------------------------
+    def query(self, query: str):
 
         results = self.hybrid_retrieve(query)
         context = self.build_context(results)
 
-        # collect full response from stream
         output = ""
 
         for token in self.stream_llm(query, context):
@@ -200,10 +183,29 @@ Answer clearly and technically.
         return {
             "intent": results["intent"],
             "answer": output,
-            "context": context,
-            "sources": {
-                "vector": len(results["vector"]),
-                "graph": len(results["graph"]),
-                "plugin": len(results["plugin"])
-            }
+            "context": context
         }
+
+
+# =========================================================
+# ENGINE SINGLETON (FIXED - OUTSIDE CLASS)
+# =========================================================
+
+_ENGINE = None
+
+
+def init_engine(vector_store, graph_store=None, plugin_index=None, embedder=None):
+    global _ENGINE
+
+    _ENGINE = RAGQueryRouterV4(
+        vector_store=vector_store,
+        graph_store=graph_store,
+        plugin_index=plugin_index,
+        embedder=embedder
+    )
+
+
+def get_engine():
+    if _ENGINE is None:
+        raise RuntimeError("RAG engine not initialized")
+    return _ENGINE

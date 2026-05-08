@@ -4,59 +4,56 @@ from pydantic import BaseModel
 import json
 import traceback
 
-from rag.query_router import RAGQueryRouterV2
+from rag.control_plane import CONTROL_PLANE
 
 router = APIRouter()
 
-_ENGINE = None
 
-
-# -----------------------------
-# ENGINE INITIALIZATION
-# -----------------------------
-def init_engine(vector_store, graph_store=None, plugin_index=None):
-    """
-    Initialize global RAG engine.
-    """
-    global _ENGINE
-    _ENGINE = RAGQueryRouterV2(
-        vector_store=vector_store,
-        graph_store=graph_store,
-        plugin_index=plugin_index
-    )
-
-
-def get_engine():
-    if _ENGINE is None:
-        raise RuntimeError("RAG engine not initialized. Call init_engine() first.")
-    return _ENGINE
-
-
-# -----------------------------
+# =========================================================
 # REQUEST MODEL
-# -----------------------------
+# =========================================================
+
 class QueryRequest(BaseModel):
     query: str
-    stream: bool = False
 
 
-# -----------------------------
-# NORMAL QUERY ENDPOINT
-# -----------------------------
+# =========================================================
+# ENGINE ACCESS (V6 SAFE)
+# =========================================================
+
+def get_engine():
+    try:
+        engine = CONTROL_PLANE.get_engine()
+
+        if engine is None:
+            raise RuntimeError("RAG engine not initialized")
+
+        # V6 SAFETY CHECKS
+        if not hasattr(engine, "query"):
+            raise RuntimeError("Engine missing V6 query method")
+
+        return engine
+
+    except Exception as e:
+        raise RuntimeError(f"Engine access failed: {str(e)}")
+
+
+# =========================================================
+# QUERY ENDPOINT (V6)
+# =========================================================
+
 @router.post("/query")
 def query(req: QueryRequest):
+
     try:
         engine = get_engine()
 
+        # V6 CONTRACT: only query() exists
         result = engine.query(req.query)
 
         return {
-            "status": "ok",
-            "query": req.query,
-            "intent": result.get("intent"),
-            "answer": result.get("answer"),
-            "sources": result.get("sources", []),
-            "context": result.get("context", [])
+            **result,
+            "api_version": "v6"
         }
 
     except Exception as e:
@@ -69,47 +66,39 @@ def query(req: QueryRequest):
         )
 
 
-# -----------------------------
-# STREAMING ENDPOINT (SSE)
-# -----------------------------
+# =========================================================
+# STREAMING ENDPOINT (V6 SAFE SSE)
+# =========================================================
+
 @router.post("/stream")
 def stream(req: QueryRequest):
-    engine = get_engine()
 
     def event_stream():
+
         try:
-            # Step 1: retrieve
-            results = engine.hybrid_retrieve(req.query)
+            engine = get_engine()
 
-            # Step 2: build context
-            context = engine.build_context(results)
+            # V6: no hybrid_retrieve dependency anymore
+            # fallback-safe: reuse query pipeline structure
 
-            # Step 3: stream LLM response
-            for chunk in engine.stream_llm(req.query, context):
-                payload = {
-                    "chunk": chunk
-                }
-                yield f"data: {json.dumps(payload)}\n\n"
+            result = engine.retrieve(req.query)
+            context = engine.build_context(result)
 
-            # end signal
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            # check optional LLM streaming support
+            if hasattr(engine, "stream_llm"):
+                for token in engine.stream_llm(req.query, context):
+                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+            else:
+                # fallback: single response
+                response = engine.answer(req.query)
+                yield f"data: {json.dumps({'type': 'response', 'content': response['answer']})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream"
     )
-
-
-# -----------------------------
-# HEALTH CHECK
-# -----------------------------
-@router.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "rag_version": "v2",
-        "engine_ready": _ENGINE is not None
-    }

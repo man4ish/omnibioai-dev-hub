@@ -1,402 +1,486 @@
-# OmniBioAI Dev Hub
+Here is an updated production-style README for your V6 FAISS-native RAG system.
 
-## AI-Native RAG + Graph + Plugin Intelligence Platform
+# OmniBioAI Dev Hub — RAG V6
 
-OmniBioAI Dev Hub is a **multi-repository RAG (Retrieval-Augmented Generation) system** designed for:
-
-* Codebase understanding across 12+ repos
-* Plugin-aware semantic search
-* Hybrid retrieval (Vector + Keyword + Graph)
-* Agentic RAG execution (V2–V4 roadmap)
-* Streaming LLM responses via Ollama
-* Live visualization UI (Graph + Vector + Chat)
-
-It is part of the larger **OmniBioAI ecosystem**.
+Production-grade Retrieval-Augmented Generation (RAG) system powering the OmniBioAI ecosystem documentation, architecture search, workflow discovery, and developer assistant APIs.
 
 ---
 
-# 🧠 System Architecture
+# Features
 
+* FAISS-native vector search
+* Incremental indexing
+* Ollama local embeddings + local LLM inference
+* FastAPI API server
+* Streaming responses (SSE)
+* Chunk-level document retrieval
+* Repository-wide multi-project indexing
+* Fully local execution
+* No OpenAI dependency
+* Production-safe embedding normalization
+* Hybrid-ready architecture
+* V6 dimension consistency enforcement
+
+---
+
+# Architecture
+
+```text
+Repositories
+     ↓
+Document Loader
+     ↓
+Chunker
+     ↓
+Ollama Embeddings (768-d)
+     ↓
+FAISS Vector Index
+     ↓
+RAG Engine
+     ↓
+FastAPI API
+     ↓
+LLM Answer Generation
 ```
+
+---
+
+# V6 Major Improvements
+
+## FAISS Native Retrieval
+
+Previous versions used brute-force cosine scanning across vectors.
+
+V6 uses:
+
+```python
+faiss.IndexFlatIP
+```
+
+Benefits:
+
+* 10–50x faster retrieval
+* scalable search
+* lower latency
+* future ANN support
+
+---
+
+## Embedding Consistency Fix
+
+A major issue in previous builds was embedding mismatch.
+
+### Old Problem
+
+| Stage    | Model            | Dimension |
+| -------- | ---------------- | --------- |
+| Indexing | all-MiniLM-L6-v2 | 384       |
+| Querying | nomic-embed-text | 768       |
+
+This caused FAISS assertion failures:
+
+```python
+AssertionError: d == self.d
+```
+
+---
+
+## V6 Fix
+
+Now BOTH ingestion and retrieval use:
+
+```text
+nomic-embed-text
+```
+
+Dimension:
+
+```text
+768
+```
+
+This guarantees:
+
+* stable retrieval
+* no dimension mismatch
+* deterministic FAISS behavior
+
+---
+
+# Repository Structure
+
+```text
 omnibioai-dev-hub/
 │
-├── ingestion/        → Repo + doc + plugin loaders
-├── processing/       → Chunking + metadata + graph builder
-├── embeddings/       → Ollama embedding interface
-├── index/            → Vector + keyword + graph stores
-├── retrieval/        → Retriever + reranker + context builder
-├── rag/              → Query routing + answer engine
-├── api/              → FastAPI backend (RAG API)
-├── scripts/          → Index build pipelines
-├── data/             → Persistent storage (chunks, graph, embeddings)
-├── cache/            → runtime cache
-├── logs/             → system logs
-├── utils/            → helpers
-├── configs/          → repo + index configs
+├── api/
+│   ├── main.py
+│   └── routes/
 │
-└── omnibioai-dev-hub-ui/
-    ├── React + Vite UI
-    ├── Chat (Streaming)
-    ├── Graph Viewer (Force Graph 3D)
-    ├── Docs Explorer
-    ├── Vector Search UI
-    └── Plugin Sidebar
+├── rag/
+│   ├── engine.py
+│   └── control_plane.py
+│
+├── index/
+│   └── vector_store.py
+│
+├── embeddings/
+│   └── embedder.py
+│
+├── ingestion/
+│   └── doc_loader.py
+│
+├── processing/
+│   └── chunker.py
+│
+├── scripts/
+│   └── build_index.py
+│
+└── data/
 ```
 
 ---
 
-# 🚀 Backend (RAG Engine)
+# Requirements
 
-## Tech Stack
+## Python
 
-* FastAPI
-* Ollama (LLMs + embeddings)
-* Sentence Transformers (fallback)
-* In-memory Vector Store (custom)
-* Graph Store (knowledge graph)
-* Plugin Index (semantic plugin search)
+Recommended:
+
+```text
+Python 3.11
+```
 
 ---
 
-## 🔍 RAG Pipeline
+## Ollama
 
-### 1. Ingestion Layer
+Install:
 
-Loads multiple repositories:
-
-```
-../omnibioai
-../omnibioai-rag
-../omnibioai-toolserver
-../omnibioai-workflow-bundles
-../omnibioai-model-registry
-../omnibioai-control-center
-../omnibioai-sdk
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
 ```
 
-### 2. Processing Layer
+---
 
-* Chunking
-* Metadata enrichment
-* Graph edge creation
+## Required Ollama Models
 
-### 3. Embedding Layer
+### Embedding Model
+
+```bash
+ollama pull nomic-embed-text
+```
+
+### Generation Models
+
+Recommended:
+
+```bash
+ollama pull mistral
+```
+
+Optional:
+
+```bash
+ollama pull llama3
+ollama pull deepseek-coder
+ollama pull deepseek-r1
+```
+
+---
+
+# Installation
+
+## Create Environment
+
+```bash
+conda create -n chemoinfo python=3.11 -y
+conda activate chemoinfo
+```
+
+---
+
+## Install Dependencies
+
+```bash
+pip install fastapi uvicorn requests numpy faiss-cpu sentence-transformers
+```
+
+---
+
+# Build Index
+
+## Clean Existing Data
+
+```bash
+rm -rf data/*
+```
+
+---
+
+## Build V6 Index
+
+```bash
+python scripts/build_index.py
+```
+
+Expected output:
+
+```text
+🚀 Incremental V6 Indexing Starting...
+✅ V6 Index Complete
+```
+
+---
+
+# Run API Server
+
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8082 --reload
+```
+
+---
+
+# Test Query API
+
+```bash
+curl -X POST http://localhost:8082/rag/query \
+-H "Content-Type: application/json" \
+-d '{"query":"What is workflow engine in OmniBioAI?"}'
+```
+
+Example response:
+
+```json
+{
+  "query": "What is workflow engine in OmniBioAI?",
+  "answer": "According to the provided context...",
+  "sources": [
+    "../omnibioai-workflow-bundles/README.md"
+  ],
+  "context_used": 5,
+  "version": "v6-faiss",
+  "api_version": "v6"
+}
+```
+
+---
+
+# Streaming API
+
+Endpoint:
+
+```text
+POST /rag/stream
+```
 
 Uses:
 
-* `mxbai-embed-large`
-* `nomic-embed-text`
-
-### 4. Index Layer
-
-* Vector Index (semantic search)
-* Keyword Index (BM25-style logic)
-* Graph Index (relations)
-* Plugin Index (tool-aware retrieval)
-
-### 5. Retrieval Layer
-
-Hybrid retrieval:
-
-```
-Vector + Keyword + Graph + Plugin
-```
-
-### 6. RAG Engine
-
-* Context builder
-* Memory injection
-* Prompt construction
-* Ollama LLM streaming
+* Server-Sent Events (SSE)
+* token streaming
+* real-time generation
 
 ---
 
-# ⚡ API Layer
+# V6 Retrieval Pipeline
 
-## FastAPI Endpoints
+## Step 1 — Chunking
 
-### Health
+Documents are split into semantic chunks.
 
-```
-GET /health
-```
+---
 
-### Status
+## Step 2 — Embedding
 
-```
-GET /status
-```
+Each chunk is embedded using:
 
-### RAG Query
-
-```
-POST /rag/query
+```text
+nomic-embed-text
 ```
 
-### Streaming
+Output dimension:
 
-```
-POST /rag/stream
+```text
+768
 ```
 
 ---
 
-# 🧩 Key Features
+## Step 3 — FAISS Indexing
 
-## 1. Hybrid Retrieval
+Vectors are stored in:
 
-* Semantic (embeddings)
-* Keyword matching
-* Graph expansion
-* Plugin-aware search
-
----
-
-## 2. Knowledge Graph
-
-Tracks relationships like:
-
-```
-Plugin → Tool → Pipeline → Dataset → Model
+```python
+faiss.IndexFlatIP
 ```
 
 ---
 
-## 3. Plugin Intelligence
+## Step 4 — Query Embedding
 
-* Searches plugin documentation
-* Injects plugin context into RAG
-
----
-
-## 4. Memory System
-
-* Stores conversation context
-* Improves multi-turn reasoning
+User query is embedded using the SAME embedding model.
 
 ---
 
-## 5. Streaming LLM
+## Step 5 — Vector Search
 
-Uses Ollama:
-
-* llama3
-* deepseek-r1
-* mistral
-
-Streaming format:
-
-```
-token-by-token SSE stream
-```
+FAISS retrieves nearest chunks.
 
 ---
 
-# 🖥️ Frontend (UI)
+## Step 6 — Prompt Assembly
 
-Location:
-
-```
-omnibioai-dev-hub-ui/
-```
-
-Built with:
-
-* React
-* TypeScript
-* Vite
+Retrieved chunks become context.
 
 ---
 
-## UI Modules
+## Step 7 — LLM Generation
 
-### 💬 Chat Panel
-
-* Streaming responses
-* Token rendering
-* RAG trace view
+Prompt sent to local Ollama model.
 
 ---
 
-### 🌐 Graph Viewer
+# Supported Repositories
 
-* Knowledge graph visualization
-* Force Graph 3D
-* Node relations (plugin ↔ repo ↔ tool)
+Current indexing targets:
 
----
-
-### 📄 Docs Explorer
-
-* Repo documentation browser
-* Chunk-level view
-
----
-
-### 🔎 Vector Search UI
-
-* semantic search results
-* similarity scoring
-
----
-
-### 📦 Plugin Sidebar
-
-* available tools
-* plugin metadata
-
----
-
-# 🔗 UI ↔ Backend Integration
-
-Vite proxy:
-
-```
-/rag → FastAPI
-/health → FastAPI
-```
-
-Streaming:
-
-```
-POST /rag/stream
+```python
+repos = [
+    "../omnibioai",
+    "../omnibioai-rag",
+    "../omnibioai-toolserver",
+    "../omnibioai-sdk",
+    "../omnibioai-workflow-bundles",
+    "../omnibioai-control-center",
+    "../omnibioai-lims",
+    "../omnibioai-model-registry",
+    "../omnibioai-dev-docker"
+]
 ```
 
 ---
 
-# 📊 Current System Status
+# Performance
 
-| Component      | Status                  |
-| -------------- | ----------------------- |
-| Repo ingestion | ✅ Working               |
-| Chunking       | ✅ Working               |
-| Embeddings     | ✅ Ollama integrated     |
-| Vector store   | ✅ Active                |
-| Graph store    | ⚠️ Basic implementation |
-| Plugin index   | ⚠️ Prototype            |
-| RAG API        | ✅ Working               |
-| Streaming      | ✅ Working               |
-| UI (React)     | ⚠️ Scaffold ready       |
-| Memory system  | ⚠️ Basic                |
-| Agent routing  | ⚠️ V3 prototype         |
+## Before V6
+
+* brute-force cosine scan
+* slow retrieval
+* dimension mismatch bugs
+* unstable indexing
 
 ---
 
-# 🧪 Current Limitations
+## After V6
 
-* No persistent vector DB (in-memory only)
-* Graph store is lightweight
-* No distributed indexing
-* No async ingestion pipeline
-* UI not fully connected to streaming state
-* No evaluation layer
-
----
-
-# 🚀 Future Roadmap
-
-## 🔹 RAG V2 (Hybrid Intelligence)
-
-* Graph-enhanced retrieval
-* Plugin-aware routing
-* Query decomposition
+* FAISS-native retrieval
+* stable dimensions
+* fast semantic search
+* local-only execution
+* scalable architecture
 
 ---
 
-## 🔹 RAG V3 (Agentic System)
+# Troubleshooting
 
-* Tool executor
-* Memory-based reasoning
-* Multi-step planning
-* Streaming agent thoughts
+## FAISS Dimension Mismatch
 
----
+Error:
 
-## 🔹 RAG V4 (Autonomous System)
+```text
+AssertionError: d == self.d
+```
 
-* Self-routing queries
-* Auto tool selection
-* Long-term memory
-* Feedback learning loop
+Cause:
 
----
+Different embedding models used during indexing vs querying.
 
-## 🔹 UI Enhancements
+Fix:
 
-* Live streaming chat UI
-* Graph interaction (click → expand reasoning)
-* Vector similarity explorer
-* Plugin execution dashboard
+Rebuild index using the SAME embedding model.
 
 ---
 
-## 🔹 Infrastructure Upgrades
+## Ollama Timeout
 
-* FAISS / Milvus integration
-* Redis cache layer
-* Async ingestion workers
-* Background indexing queue
+Error:
 
----
+```text
+Read timed out
+```
 
-## 🔹 Observability
+Fix:
 
-* Query tracing
-* RAG debug view
-* Token-level latency tracking
+Use a smaller generation model:
 
----
+```python
+model="mistral"
+```
 
-# 🧠 Design Philosophy
+instead of:
 
-OmniBioAI Dev Hub is not just a RAG system.
-
-It is evolving into:
-
-> **"A self-explaining biomedical + code intelligence system with graph memory + plugin reasoning + autonomous retrieval agents."**
+```python
+deepseek-r1
+```
 
 ---
 
-# 📦 Run System
+## Empty Retrieval Results
 
-## Backend
+Check:
 
 ```bash
-PYTHONPATH=. uvicorn api.main:app --reload --port 8082
+python -c "
+from index.vector_store import VectorStore
+import numpy as np
+
+vs = VectorStore()
+vs.add([np.random.rand(768)], [{'text':'test'}])
+
+print(vs.index.ntotal)
+"
 ```
 
-## UI
+Expected:
 
-```bash
-cd omnibioai-dev-hub-ui
-npm install
-npm run dev
+```text
+1
 ```
 
 ---
 
-# ⚠️ Notes
+# Future Roadmap
 
-* Ensure Ollama is running:
+## Planned V7 Features
 
-```bash
-ollama serve
-```
-
-* Recommended models:
-
-  * llama3
-  * mxbai-embed-large
+* IVF indexes
+* HNSW search
+* metadata filtering
+* hybrid BM25 + vector search
+* reranking
+* cross-encoder scoring
+* persistent FAISS storage
+* multi-user collections
+* distributed indexing
+* workflow-aware retrieval
+* graph RAG
+* plugin-aware retrieval
 
 ---
 
-# 🔥 Summary
+# License
 
-OmniBioAI Dev Hub is a:
+Internal OmniBioAI Development License.
 
-✔ Multi-repo intelligence engine
-✔ Hybrid RAG system (vector + graph + plugin)
-✔ Streaming LLM API
-✔ React-based visualization platform
-✔ Foundation for autonomous scientific agents
+---
 
+# OmniBioAI Ecosystem
+
+RAG V6 powers:
+
+* architecture discovery
+* workflow documentation search
+* plugin documentation retrieval
+* developer assistant APIs
+* AI infrastructure exploration
+* cross-repository semantic search
+* internal engineering copilots

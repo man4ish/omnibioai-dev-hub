@@ -1,54 +1,96 @@
 import sys
 import os
+import hashlib
+import numpy as np
 
 sys.path.append(os.path.abspath("."))
 
 from index.vector_store import VectorStore
-from embeddings.embedder import Embedder
+from rag.engine import ollama_embed   # SINGLE SOURCE OF TRUTH
 from ingestion.doc_loader import load_documents
 from processing.chunker import chunk_text
 
+def hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def normalize_vector(vec):
+    vec = np.array(vec, dtype=np.float32)
+
+    if vec.ndim == 3:
+        vec = vec.squeeze()
+
+    if vec.ndim == 2:
+        vec = vec.reshape(-1)
+
+    return vec.astype(np.float32)
+
 
 def build_index():
-    print("🚀 Starting OmniBioAI indexing pipeline...")
+
+    print("🚀 Incremental V6 Indexing Starting...")
 
     vector_store = VectorStore()
-    embedder = Embedder()
 
     repos = [
         "../omnibioai",
         "../omnibioai-rag",
-        "../omnibioai-tes",
         "../omnibioai-toolserver",
-        "../omnibioai-workflow-bundles"
+        "../omnibioai-sdk",
+        "../omnibioai-workflow-bundles",
+        "../omnibioai-control-center",
+        "../omnibioai-lims",
+        "../omnibioai-model-registry",
+        "../omnibioai-dev-docker"
     ]
 
     docs = load_documents(repos)
 
     all_vectors = []
     all_meta = []
+    seen_hashes = set()
+
+    stats = {"skipped": 0, "new": 0, "chunks_indexed": 0}
 
     for doc in docs:
-        chunks = chunk_text(doc["text"])
-        vectors = embedder.encode(chunks)
 
-        for i, vec in enumerate(vectors):
+        text = doc.get("text", "")
+        if not text:
+            continue
+
+        for chunk in chunk_text(text):
+
+            h = hash_text(chunk)
+
+            if h in seen_hashes:
+                stats["skipped"] += 1
+                continue
+
+            seen_hashes.add(h)
+            stats["new"] += 1
+
+            vec = ollama_embed(chunk)   # <<< SINGLE EMBEDDING SOURCE
+            vec = normalize_vector(vec)
+
             all_vectors.append(vec)
             all_meta.append({
-                "id": doc.get("id", ""),
-                "text": chunks[i],
-                "source": doc.get("source", "unknown")
+                "text": chunk,
+                "source": doc.get("source", "unknown"),
+                "hash": h
             })
+
+            stats["chunks_indexed"] += 1
+
+    if not all_vectors:
+        print("⚠️ No vectors generated")
+        return
+
+    all_vectors = np.vstack(all_vectors).astype(np.float32)
 
     vector_store.add(all_vectors, all_meta)
 
-    # optional: persist index
-    os.makedirs("data/index", exist_ok=True)
-    vector_store.save("data/index/vector_store.pkl")
-
-    print(f"✅ Indexing complete")
-    print(f"   Docs: {len(docs)}")
-    print(f"   Chunks: {len(all_vectors)}")
+    print("✅ V6 Index Complete")
+    print(stats)
 
 
 if __name__ == "__main__":

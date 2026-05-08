@@ -1,20 +1,30 @@
-import { useState } from "react";
-import { ragStream } from "../api/client";
+import { useAppStore } from "../store/appStore";
 
-export function useRagStream() {
-  const [answer, setAnswer] = useState("");
-  const [loading, setLoading] = useState(false);
+const API = "http://127.0.0.1:8082";
 
-  const run = async (query: string) => {
-    setAnswer("");
-    setLoading(true);
+export async function streamRAG(query: string) {
+  const setAnswer = useAppStore.getState().setAnswer;
 
-    await ragStream(query, (token) => {
-      setAnswer((prev) => prev + token);
-    });
+  const res = await fetch(`${API}/rag/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
 
-    setLoading(false);
-  };
+  const reader = res.body?.getReader();
+  const decoder = new TextDecoder();
 
-  return { answer, run, loading };
+  let fullText = "";
+
+  while (true) {
+    const { value, done } = await reader!.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value);
+    fullText += chunk;
+
+    setAnswer(fullText);
+  }
+
+  return fullText;
 }

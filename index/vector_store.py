@@ -1,64 +1,102 @@
-import pickle
-import os
 import numpy as np
+import faiss
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Single canonical dimension for nomic-embed-text.
+# If this ever changes, delete the index and re-run build_index.py.
+CANONICAL_DIM = 768
 
 
 class VectorStore:
+
     def __init__(self):
-        self.vectors = []
+        self.index = None
         self.metadata = []
+        self.dim = None  # None until first vector is inserted; immutable after that
 
-    # -----------------------------
-    # ADD DATA
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # Internal: lazy FAISS init
+    # ------------------------------------------------------------------
+
+    def _init_index(self, dim: int):
+        if dim != CANONICAL_DIM:
+            raise ValueError(
+                f"VectorStore: refusing to initialize with dim={dim}. "
+                f"Only nomic-embed-text ({CANONICAL_DIM}-d) embeddings are supported. "
+                f"Delete stale index data and re-run build_index.py."
+            )
+        self.dim = dim
+        self.index = faiss.IndexFlatIP(dim)
+        logger.info(f"FAISS IndexFlatIP initialized: dim={dim}")
+
+    # ------------------------------------------------------------------
+    # Internal: normalize any input to shape (N, D) float32
+    # ------------------------------------------------------------------
+
+    def _coerce_shape(self, vectors) -> np.ndarray:
+        vecs = np.array(vectors, dtype=np.float32)
+
+        if vecs.ndim == 1:
+            vecs = vecs.reshape(1, -1)
+        elif vecs.ndim == 3:
+            # (N, 1, D) or similar — flatten last two dims into D
+            vecs = vecs.reshape(vecs.shape[0], -1)
+
+        if vecs.ndim != 2:
+            raise ValueError(
+                f"Cannot coerce vectors to (N, D): "
+                f"input resolved to shape {vecs.shape}"
+            )
+        return vecs
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def add(self, vectors, metadata):
-        self.vectors.extend(vectors)
+        vecs = self._coerce_shape(vectors)
+
+        # Lazy index creation on first insert
+        if self.index is None:
+            self._init_index(vecs.shape[1])
+
+        if vecs.shape[1] != self.dim:
+            raise ValueError(
+                f"Embedding dimension mismatch on add(): "
+                f"index is {self.dim}-d, got {vecs.shape[1]}-d. "
+                f"Do not mix embedding models in the same index."
+            )
+
+        self.index.add(vecs)
         self.metadata.extend(metadata)
+        logger.debug(f"VectorStore.add: +{len(vecs)} vectors, total={self.index.ntotal}")
 
-    # -----------------------------
-    # SEARCH (optional use later)
-    # -----------------------------
-    def search(self, query_vector, top_k=5):
-        scores = []
+    def search(self, query_vec, top_k: int = 5):
+        if self.index is None or self.index.ntotal == 0:
+            return []
 
-        for i, vec in enumerate(self.vectors):
-            score = self.cosine_similarity(query_vector, vec)
-            scores.append((score, self.metadata[i]))
+        q = self._coerce_shape(query_vec)
 
-        scores.sort(reverse=True, key=lambda x: x[0])
-        return scores[:top_k]
+        if q.shape[1] != self.dim:
+            raise ValueError(
+                f"Query dimension mismatch: index expects {self.dim}-d, "
+                f"query is {q.shape[1]}-d. "
+                f"Ensure nomic-embed-text is used for both indexing and querying."
+            )
 
-    # -----------------------------
-    # COSINE SIMILARITY
-    # -----------------------------
-    def cosine_similarity(self, a, b):
-        a = np.array(a)
-        b = np.array(b)
-        return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+        k = min(top_k, self.index.ntotal)
+        scores, indices = self.index.search(q, k)
 
-    # -----------------------------
-    # SAVE INDEX
-    # -----------------------------
-    def save(self, path: str):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        results = []
+        for s, i in zip(scores[0], indices[0]):
+            if i < 0 or i >= len(self.metadata):
+                continue
+            results.append({
+                "score": float(s),
+                "text": self.metadata[i].get("text", ""),
+                "source": self.metadata[i].get("source", "unknown"),
+            })
 
-        with open(path, "wb") as f:
-            pickle.dump({
-                "vectors": self.vectors,
-                "metadata": self.metadata
-            }, f)
-
-    # -----------------------------
-    # LOAD INDEX
-    # -----------------------------
-    def load(self, path: str):
-        if not os.path.exists(path):
-            return False
-
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-
-        self.vectors = data["vectors"]
-        self.metadata = data["metadata"]
-
-        return True
+        return results

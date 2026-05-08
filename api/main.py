@@ -1,4 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+import asyncio
+import numpy as np
 
 from api.routes import rag
 
@@ -10,21 +15,38 @@ from processing.chunker import chunk_text
 from index.graph_store import GraphStore
 from index.plugin_index import PluginIndex
 
-import threading
-import time
+from rag.control_plane import CONTROL_PLANE
+from rag.engine import ollama_embed
 
-app = FastAPI(title="OmniBioAI Dev Hub RAG Engine")
 
-# -----------------------------
-# GLOBAL OBJECTS
-# -----------------------------
+# =========================================================
+# APP INIT
+# =========================================================
+
+app = FastAPI(title="OmniBioAI Dev Hub Control Plane V5")
+
+
+# =========================================================
+# CORS
+# =========================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# =========================================================
+# GLOBAL STATE
+# =========================================================
+
 vector_store = VectorStore()
 embedder = Embedder()
-
 graph_store = GraphStore()
-plugin_index = PluginIndex()
-
-rag_engine_ready = False
+plugin_index = PluginIndex([])
 
 indexing_status = {
     "running": False,
@@ -33,37 +55,37 @@ indexing_status = {
     "errors": 0
 }
 
-# -----------------------------
-# REPO CONFIG (CENTRALIZED)
-# -----------------------------
+
+# =========================================================
+# REPOSITORIES
+# =========================================================
+
 REPOS = [
     "../omnibioai",
     "../omnibioai-rag",
-    "../omnibioai-tes",
     "../omnibioai-toolserver",
     "../omnibioai-tool-runtime",
     "../omnibioai-workflow-bundles",
     "../omnibioai-model-registry",
     "../omnibioai-control-center",
-    "../omnibioai-tool-images",
+    "../omnibioai-sdk",
     "../omnibioai-dev-docker",
-    "../omnibioai-lims",
-    "../omnibioai_sdk"
+    "../omnibioai-lims"
 ]
 
 
-# -----------------------------
-# INDEX BUILD PIPELINE
-# -----------------------------
-def build_index():
-    global indexing_status
+# =========================================================
+# INDEX PIPELINE
+# =========================================================
+
+async def build_index():
 
     indexing_status["running"] = True
 
     docs = load_documents(REPOS)
 
-    all_vectors = []
-    all_meta = []
+    vectors = []
+    metadata = []
 
     doc_count = 0
     chunk_count = 0
@@ -78,13 +100,12 @@ def build_index():
             chunks = chunk_text(text)
             chunk_count += len(chunks)
 
-            vectors = embedder.encode(chunks)
-
-            for i in range(len(vectors)):
-                all_vectors.append(vectors[i])
-                all_meta.append({
+            for chunk in chunks:
+                vec = ollama_embed(chunk)
+                vectors.append(vec)
+                metadata.append({
                     "id": doc.get("id", ""),
-                    "text": chunks[i],
+                    "text": chunk,
                     "source": doc.get("source", "unknown")
                 })
 
@@ -92,9 +113,9 @@ def build_index():
 
         except Exception as e:
             error_count += 1
-            print(f"[Index Error] {doc.get('source', 'unknown')}: {str(e)}")
+            print(f"[Index Error] {doc.get('source', 'unknown')} -> {str(e)}")
 
-    vector_store.add(all_vectors, all_meta)
+    vector_store.add(vectors, metadata)
 
     indexing_status.update({
         "running": False,
@@ -104,104 +125,103 @@ def build_index():
     })
 
 
-# -----------------------------
-# OPTIONAL: GRAPH SEED (can extend later)
-# -----------------------------
+# =========================================================
+# GRAPH SEED
+# =========================================================
+
 def build_graph_seed():
-    graph_store.add_edge("plugin architecture", "workflow engine", "depends_on")
-    graph_store.add_edge("RAG system", "vector store", "uses")
-    graph_store.add_edge("OmniBioAI", "plugin system", "includes")
+    graph_store.add_edge("OmniBioAI", "RAG Engine", "powers")
+    graph_store.add_edge("RAG Engine", "Vector Store", "uses")
+    graph_store.add_edge("RAG Engine", "Graph Store", "augments")
+    graph_store.add_edge("Plugin System", "Workflow Engine", "drives")
 
 
-# -----------------------------
-# PLUGIN INDEX SEED (minimal bootstrap)
-# -----------------------------
+# =========================================================
+# PLUGIN SEED
+# =========================================================
+
 def build_plugin_index():
-    plugin_index.add([
-        {
-            "text": "workflow_builder plugin manages DAG-based pipelines",
-            "plugin": "workflow_builder"
-        },
-        {
-            "text": "plugin_executor runs bioinformatics workflows",
-            "plugin": "plugin_executor"
-        },
-        {
-            "text": "qc_plots generates sequencing QC reports",
-            "plugin": "qc_plots"
-        }
-    ])
+    plugin_index.docs = [
+        {"text": "workflow_builder manages DAG pipelines", "plugin": "workflow_builder"},
+        {"text": "plugin_executor runs bioinformatics workflows", "plugin": "plugin_executor"},
+        {"text": "qc_plots generates sequencing QC reports", "plugin": "qc_plots"}
+    ]
 
 
-# -----------------------------
-# RAG INIT
-# -----------------------------
-def init_rag():
-    rag.init_engine(
-        vector_store,
-        graph_store=graph_store,
-        plugin_index=plugin_index
-    )
+# =========================================================
+# CONTROL PLANE INIT
+# =========================================================
 
-
-# -----------------------------
-# BOOTSTRAP PIPELINE
-# -----------------------------
-def bootstrap():
-    global rag_engine_ready
-
-    print("🚀 Starting OmniBioAI RAG v2 bootstrap...")
+async def init_control_plane():
 
     build_graph_seed()
     build_plugin_index()
+    await build_index()
 
-    build_index()
-
-    time.sleep(1)
-
-    init_rag()
-
-    rag_engine_ready = True
-
-    print("✅ OmniBioAI RAG system ready")
+    CONTROL_PLANE.init(
+        vector_store=vector_store,
+        graph_store=graph_store,
+        plugin_index=plugin_index,
+        embedder=embedder
+    )
 
 
-# -----------------------------
-# STARTUP (NON-BLOCKING SAFE)
-# -----------------------------
+# =========================================================
+# STARTUP
+# =========================================================
+
 @app.on_event("startup")
-def startup_event():
-    thread = threading.Thread(target=bootstrap, daemon=True)
-    thread.start()
+async def startup_event():
+    await init_control_plane()
 
 
-# -----------------------------
+# =========================================================
 # ROUTES
-# -----------------------------
+# =========================================================
+
 app.include_router(rag.router, prefix="/rag")
 
 
-# -----------------------------
-# HEALTH CHECK
-# -----------------------------
+# =========================================================
+# HEALTH
+# =========================================================
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
         "service": "omnibioai-dev-hub",
-        "rag_ready": rag_engine_ready
+        "control_plane": CONTROL_PLANE.status()
     }
 
 
-# -----------------------------
-# SYSTEM STATUS (UI READY)
-# -----------------------------
+# =========================================================
+# STATUS
+# =========================================================
+
 @app.get("/status")
 def status():
     return {
-        "rag_ready": rag_engine_ready,
+        "control_plane": CONTROL_PLANE.status(),
         "indexing": indexing_status,
         "repos_loaded": len(REPOS),
         "graph_edges": len(graph_store.edges),
         "plugins_loaded": len(plugin_index.docs)
     }
+
+
+# =========================================================
+# SAFETY MIDDLEWARE (FIXED)
+# =========================================================
+
+@app.middleware("http")
+async def guard_requests(request: Request, call_next):
+
+    if request.url.path.startswith("/rag"):
+        if CONTROL_PLANE.status()["status"] != "READY":
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Control plane not ready"}
+            )
+
+    return await call_next(request)
