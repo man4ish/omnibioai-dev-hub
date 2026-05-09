@@ -1,0 +1,45 @@
+# ── Runtime: Python API + nginx serve UI ─────────────────────────────────────
+FROM ghcr.io/man4ish/omnibioai-base:latest
+
+LABEL org.opencontainers.image.source=https://github.com/man4ish/omnibioai
+
+RUN apt-get update && apt-get install -y --no-install-recommends nginx \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir fastapi uvicorn requests \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY api/ ./api/
+COPY embeddings/ ./embeddings/
+COPY index/ ./index/
+COPY ingestion/ ./ingestion/
+COPY processing/ ./processing/
+COPY retrieval/ ./retrieval/
+COPY rag/ ./rag/
+COPY utils/ ./utils/
+COPY configs/ ./configs/
+
+# Copy pre-built UI to nginx web root
+COPY omnibioai-dev-hub-ui/dist /usr/share/nginx/html
+
+# nginx — serve UI on 5173, proxy API routes → FastAPI on 8082
+RUN printf 'server {\n\
+    listen 5173;\n\
+    root /usr/share/nginx/html;\n\
+    index index.html;\n\
+    location / { try_files $uri $uri/ /index.html; }\n\
+    location /api/ { proxy_pass http://127.0.0.1:8082; proxy_set_header Host $host; }\n\
+    location /rag/ { proxy_pass http://127.0.0.1:8082; }\n\
+    location /health { proxy_pass http://127.0.0.1:8082; }\n\
+    location /status { proxy_pass http://127.0.0.1:8082; }\n\
+    location /docs { proxy_pass http://127.0.0.1:8082; }\n\
+}\n' > /etc/nginx/sites-available/default
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
+
+EXPOSE 8082 5173
+
+CMD ["bash", "-c", "nginx && uvicorn api.main:app --host 0.0.0.0 --port 8082 --reload"]
