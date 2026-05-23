@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8082";
+const API_BASE = "";
 
 // ------------------ RAG QUERY ------------------
 export const ragQuery = async (query: string) => {
@@ -15,7 +15,7 @@ export const ragQuery = async (query: string) => {
 export const ragStream = async (
   query: string,
   onToken: (t: string) => void,
-  onDone?: () => void,
+  onDone?: (fullContent?: string) => void,
   onError?: (e: any) => void
 ) => {
   try {
@@ -46,8 +46,10 @@ export const ragStream = async (
         if (match?.[1]) {
           try {
             const json = JSON.parse(match[1]);
-            if (json.chunk) onToken(json.chunk);
-            if (json.done) onDone?.();
+            if (json.type === "token" && json.content) onToken(json.content);
+            if (json.type === "response" && json.content) onDone?.(json.content);
+            if (json.type === "done") onDone?.();
+            if (json.type === "error") onError?.(json.message);
           } catch {
             onToken(match[1]);
           }

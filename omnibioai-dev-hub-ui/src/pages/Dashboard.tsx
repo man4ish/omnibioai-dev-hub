@@ -13,13 +13,7 @@ interface StatusData {
     error: string | null;
     metrics: { init_time: number; build_time_ms: number };
   };
-  indexing: {
-    running: boolean;
-    docs: number;
-    chunks: number;
-    errors: number;
-  };
-  repos_loaded: number;
+  index_vectors: number;
   graph_edges: number;
   plugins_loaded: number;
 }
@@ -60,7 +54,7 @@ export default function DashboardPage({ onNavigate }: Props) {
       setError(null);
       setLastRefresh(new Date());
       setUptimeHistory(h => [...h.slice(-14), data.control_plane.uptime_sec]);
-      setDocHistory(h => [...h.slice(-14), data.indexing.docs]);
+      setDocHistory(h => [...h.slice(-14), data.index_vectors]);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -98,13 +92,12 @@ export default function DashboardPage({ onNavigate }: Props) {
   }
 
   const cp = status!.control_plane;
-  const ix = status!.indexing;
+  const indexVectors = status!.index_vectors;
 
   const pipelineSteps = [
-    { label: "Repos",      sub: `${status!.repos_loaded} loaded`,                         icon: "⇧", state: status!.repos_loaded > 0 ? "done" : "active" },
-    { label: "Chunking",   sub: `${ix.chunks} chunks`,                                    icon: "⧉", state: ix.chunks > 0 ? "done" : "active" },
-    { label: "Indexing",   sub: ix.running ? "Running…" : `${ix.docs} docs`,              icon: "◈", state: !ix.running && ix.docs > 0 ? "done" : "active" },
+    { label: "Indexing",   sub: `${indexVectors} vectors`,                                 icon: "◈", state: indexVectors > 0 ? "done" : "active" },
     { label: "Plugins",    sub: `${status!.plugins_loaded} loaded`,                        icon: "◫", state: status!.plugins_loaded > 0 ? "done" : "active" },
+    { label: "Graph",      sub: `${status!.graph_edges} edges`,                            icon: "⧉", state: status!.graph_edges > 0 ? "done" : "active" },
     { label: "RAG Engine", sub: cp.engine_ready ? "Ready" : "Initializing",               icon: "✦", state: cp.engine_ready ? "active" : "done" },
   ];
 
@@ -117,7 +110,6 @@ export default function DashboardPage({ onNavigate }: Props) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className={`badge ${cp.status === "READY" ? "success" : "warn"}`}>{cp.status}</span>
-          {ix.errors > 0 && <span className="badge error">{ix.errors} errors</span>}
           <button className="section-action" onClick={fetchStatus}>↻ Refresh</button>
         </div>
       </div>
@@ -125,19 +117,14 @@ export default function DashboardPage({ onNavigate }: Props) {
       {/* STAT CARDS */}
       <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-label">Documents</div>
-          <div className="stat-value">{ix.docs}</div>
-          <div className={`stat-delta${ix.running ? " warn" : ""}`}>{ix.running ? "● Indexing…" : "● Indexed"}</div>
+          <div className="stat-label">Index Vectors</div>
+          <div className="stat-value">{indexVectors}</div>
+          <div className="stat-delta">● Indexed</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Chunks</div>
-          <div className="stat-value">{ix.chunks}</div>
+          <div className="stat-label">Graph Edges</div>
+          <div className="stat-value">{status!.graph_edges}</div>
           <div className="stat-delta muted">total</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Repos Loaded</div>
-          <div className="stat-value">{status!.repos_loaded}</div>
-          <div className="stat-delta muted">repositories</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Plugins</div>
@@ -178,8 +165,8 @@ export default function DashboardPage({ onNavigate }: Props) {
           <div className="metric-row">
             <div className="metric-item">
               <div className="metric-header">
-                <span className="metric-name">Documents</span>
-                <span className="metric-val">{ix.docs}</span>
+                <span className="metric-name">Index Vectors</span>
+                <span className="metric-val">{indexVectors}</span>
               </div>
               <Sparkline data={docHistory} />
             </div>
@@ -199,12 +186,10 @@ export default function DashboardPage({ onNavigate }: Props) {
             </div>
             <div className="metric-item">
               <div className="metric-header">
-                <span className="metric-name">Index Errors</span>
-                <span className="metric-val" style={{ color: ix.errors > 0 ? "var(--danger)" : "var(--text)" }}>
-                  {ix.errors}
-                </span>
+                <span className="metric-name">Plugins Loaded</span>
+                <span className="metric-val">{status!.plugins_loaded}</span>
               </div>
-              <Sparkline data={[ix.errors === 0 ? 1 : ix.errors]} color={ix.errors > 0 ? "red" : undefined} />
+              <Sparkline data={[status!.plugins_loaded]} />
             </div>
           </div>
         </div>
@@ -219,11 +204,10 @@ export default function DashboardPage({ onNavigate }: Props) {
               {[
                 ["Engine status",   cp.status],
                 ["Engine ready",    cp.engine_ready ? "Yes" : "No"],
-                ["Indexing active", ix.running ? "Yes" : "No"],
-                ["Repos loaded",    String(status!.repos_loaded)],
+                ["Index vectors",   String(indexVectors)],
                 ["Plugins loaded",  String(status!.plugins_loaded)],
                 ["Graph edges",     String(status!.graph_edges)],
-                ["Build time",      `${cp.metrics.build_time_ms.toFixed(2)} ms`],
+                ["Build time",      `${cp.metrics.build_time_ms?.toFixed(2) ?? "—"} ms`],
                 ["Uptime",          `${cp.uptime_sec.toFixed(1)} s`],
               ].map(([k, v]) => (
                 <tr key={k} style={{ borderBottom: "1px solid var(--border)" }}>

@@ -1,3 +1,4 @@
+import os
 import requests
 import numpy as np
 from typing import List, Dict, Any
@@ -6,7 +7,7 @@ from typing import List, Dict, Any
 # =========================================================
 # OLLAMA CONFIG
 # =========================================================
-OLLAMA_URL = "http://ollama:11434/api"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api")
 EMBED_DIM = 768
 
 

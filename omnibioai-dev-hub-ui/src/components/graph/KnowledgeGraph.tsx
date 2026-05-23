@@ -1,7 +1,7 @@
 import ForceGraph3D from "react-force-graph-3d";
 import { useEffect, useState } from "react";
 
-const API = "http://127.0.0.1:8082";
+const API = "";
 
 export default function KnowledgeGraph() {
   const [graph, setGraph] = useState<any>({ nodes: [], links: [] });

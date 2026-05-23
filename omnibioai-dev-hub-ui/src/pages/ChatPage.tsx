@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import { ragStream } from "../api/client";
 
 interface Message {
@@ -44,12 +45,16 @@ export default function ChatPage() {
           return updated;
         });
       },
-      () => {
+      (fullContent?: string) => {
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last.role === "bot") {
-            updated[updated.length - 1] = { ...last, streaming: false };
+            updated[updated.length - 1] = {
+              ...last,
+              text: fullContent ?? last.text,
+              streaming: false,
+            };
           }
           return updated;
         });
@@ -88,10 +93,16 @@ export default function ChatPage() {
         <div className="chat-messages">
           {messages.map((msg, i) => (
             <div key={i} className={`chat-bubble ${msg.role}`}>
-              <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "var(--sans)", fontSize: 13 }}>
-                {msg.text}
-                {msg.streaming && <span className="cursor-blink" />}
-              </pre>
+              {msg.role === "bot" ? (
+                <div style={{ fontSize: 13 }}>
+                  <ReactMarkdown>{msg.text}</ReactMarkdown>
+                  {msg.streaming && <span className="cursor-blink" />}
+                </div>
+              ) : (
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "var(--sans)", fontSize: 13 }}>
+                  {msg.text}
+                </pre>
+              )}
               {msg.sources && msg.sources.length > 0 && (
                 <div className="chat-sources">
                   Sources: {msg.sources.join(" · ")}

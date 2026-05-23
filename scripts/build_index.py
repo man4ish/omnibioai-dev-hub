@@ -32,16 +32,27 @@ def build_index():
 
     vector_store = VectorStore()
 
+    REPO_BASE = os.environ.get("REPO_BASE", "/repos")
     repos = [
-        "../omnibioai",
-        "../omnibioai-rag",
-        "../omnibioai-toolserver",
-        "../omnibioai-sdk",
-        "../omnibioai-workflow-bundles",
-        "../omnibioai-control-center",
-        "../omnibioai-lims",
-        "../omnibioai-model-registry",
-        "../omnibioai-dev-docker"
+        f"{REPO_BASE}/omnibioai",
+        f"{REPO_BASE}/omnibioai-rag",
+        f"{REPO_BASE}/omnibioai-toolserver",
+        f"{REPO_BASE}/omnibioai-sdk",
+        f"{REPO_BASE}/omnibioai-workflow-bundles",
+        f"{REPO_BASE}/omnibioai-control-center",
+        f"{REPO_BASE}/omnibioai-lims",
+        f"{REPO_BASE}/omnibioai-model-registry",
+        f"{REPO_BASE}/omnibioai-dev-docker",
+        f"{REPO_BASE}/omnibioai-api-gateway",
+        f"{REPO_BASE}/omnibioai-docs",
+        f"{REPO_BASE}/omnibioai-studio",
+        f"{REPO_BASE}/omnibioai-auth",
+        f"{REPO_BASE}/omnibioai-tool-runtime",
+        f"{REPO_BASE}/omnibioai-iam-client",
+        f"{REPO_BASE}/omnibioai-policy-engine",
+        f"{REPO_BASE}/omnibioai-security-audit",
+        f"{REPO_BASE}/omnibioai-security-sdk",
+        f"{REPO_BASE}/omnibioai-hpc-policy-engine",
     ]
 
     docs = load_documents(repos)
@@ -69,8 +80,13 @@ def build_index():
             seen_hashes.add(h)
             stats["new"] += 1
 
-            vec = ollama_embed(chunk)   # <<< SINGLE EMBEDDING SOURCE
-            vec = normalize_vector(vec)
+            try:
+                vec = ollama_embed(chunk)   # <<< SINGLE EMBEDDING SOURCE
+                vec = normalize_vector(vec)
+            except Exception as e:
+                print(f"⚠️  Skipping chunk from {doc.get('source')}: {e}")
+                stats["skipped"] += 1
+                continue
 
             all_vectors.append(vec)
             all_meta.append({
@@ -88,6 +104,10 @@ def build_index():
     all_vectors = np.vstack(all_vectors).astype(np.float32)
 
     vector_store.add(all_vectors, all_meta)
+
+    save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "faiss_index")
+    vector_store.save(save_path)
+    print(f"💾 Index saved to {save_path} ({vector_store.index.ntotal} vectors)")
 
     print("✅ V6 Index Complete")
     print(stats)

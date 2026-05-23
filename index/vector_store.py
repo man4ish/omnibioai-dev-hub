@@ -1,3 +1,5 @@
+import os
+import pickle
 import numpy as np
 import faiss
 import logging
@@ -100,3 +102,26 @@ class VectorStore:
             })
 
         return results
+
+    def save(self, directory: str):
+        os.makedirs(directory, exist_ok=True)
+        if self.index is None:
+            raise RuntimeError("VectorStore.save: index is empty, nothing to save")
+        faiss.write_index(self.index, os.path.join(directory, "index.faiss"))
+        with open(os.path.join(directory, "metadata.pkl"), "wb") as f:
+            pickle.dump({"metadata": self.metadata, "dim": self.dim}, f)
+        logger.info(f"VectorStore saved to {directory} ({self.index.ntotal} vectors)")
+
+    def load(self, directory: str) -> bool:
+        index_path = os.path.join(directory, "index.faiss")
+        meta_path = os.path.join(directory, "metadata.pkl")
+        if not os.path.exists(index_path) or not os.path.exists(meta_path):
+            logger.warning(f"VectorStore.load: no saved index found at {directory}")
+            return False
+        self.index = faiss.read_index(index_path)
+        with open(meta_path, "rb") as f:
+            saved = pickle.load(f)
+        self.metadata = saved["metadata"]
+        self.dim = saved["dim"]
+        logger.info(f"VectorStore loaded from {directory} ({self.index.ntotal} vectors)")
+        return True

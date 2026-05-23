@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
 
 const NAV = [
   {
@@ -40,6 +41,7 @@ interface Props {
 }
 
 export default function MainLayout({ page, setPage, children, breadcrumb }: Props) {
+  const user = useCurrentUser();
   return (
     <div className="app-shell">
       {/* TOPBAR */}
@@ -90,10 +92,10 @@ export default function MainLayout({ page, setPage, children, breadcrumb }: Prop
 
           <div className="sidebar-footer">
             <div className="sidebar-footer-user">
-              <div className="avatar">AD</div>
+              <div className="avatar">{user.initials}</div>
               <div>
-                <div style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 500 }}>Adarsh</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Admin</div>
+                <div style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 500 }}>{user.name}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{user.role}</div>
               </div>
             </div>
           </div>

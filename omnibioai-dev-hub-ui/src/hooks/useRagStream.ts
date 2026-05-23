@@ -1,6 +1,6 @@
 import { useAppStore } from "../store/appStore";
 
-const API = "http://127.0.0.1:8082";
+const API = "";
 
 export async function streamRAG(query: string) {
   const setAnswer = useAppStore.getState().setAnswer;
