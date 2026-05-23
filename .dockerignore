@@ -11,10 +11,3 @@ htmlcov/
 docker-compose*
 .dockerignore
 omnibioai-dev-hub-ui/node_modules
-omnibioai-dev-hub-ui/src
-omnibioai-dev-hub-ui/public
-omnibioai-dev-hub-ui/*.json
-omnibioai-dev-hub-ui/*.js
-omnibioai-dev-hub-ui/*.ts
-omnibioai-dev-hub-ui/index.html
-omnibioai-dev-hub-ui/README.md

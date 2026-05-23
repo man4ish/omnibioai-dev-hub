@@ -2,21 +2,19 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-import asyncio
-import numpy as np
+import logging
 
 from api.routes import rag
 
 from index.vector_store import VectorStore
 from embeddings.embedder import Embedder
-from ingestion.doc_loader import load_documents
-from processing.chunker import chunk_text
 
 from index.graph_store import GraphStore
 from index.plugin_index import PluginIndex
 
 from rag.control_plane import CONTROL_PLANE
-from rag.engine import ollama_embed
+
+logger = logging.getLogger(__name__)
 
 
 # =========================================================
@@ -44,86 +42,12 @@ app.add_middleware(
 # =========================================================
 
 vector_store = VectorStore()
+loaded = vector_store.load("data/faiss_index")
+if not loaded:
+    logger.warning("No persisted FAISS index found; will build from scratch on startup")
 embedder = Embedder()
 graph_store = GraphStore()
 plugin_index = PluginIndex([])
-
-indexing_status = {
-    "running": False,
-    "docs": 0,
-    "chunks": 0,
-    "errors": 0
-}
-
-
-# =========================================================
-# REPOSITORIES
-# =========================================================
-
-REPOS = [
-    "/workspace/omnibioai",
-    "/workspace/omnibioai-rag",
-    "/workspace/omnibioai-toolserver",
-    "/workspace/omnibioai-tool-runtime",
-    "/workspace/omnibioai-workflow-bundles",
-    "/workspace/omnibioai-model-registry",
-    "/workspace/omnibioai-control-center",
-    "/workspace/omnibioai_sdk",
-    "/workspace/omnibioai-dev-docker",
-    "/workspace/omnibioai-lims"
-]
-
-
-# =========================================================
-# INDEX PIPELINE
-# =========================================================
-
-async def build_index():
-
-    indexing_status["running"] = True
-
-    docs = load_documents(REPOS)
-
-    vectors = []
-    metadata = []
-
-    doc_count = 0
-    chunk_count = 0
-    error_count = 0
-
-    for doc in docs:
-        try:
-            text = doc.get("text", "")
-            if not text:
-                continue
-
-            chunks = chunk_text(text)
-            chunk_count += len(chunks)
-
-            for chunk in chunks:
-                vec = ollama_embed(chunk)
-                vectors.append(vec)
-                metadata.append({
-                    "id": doc.get("id", ""),
-                    "text": chunk,
-                    "source": doc.get("source", "unknown")
-                })
-
-            doc_count += 1
-
-        except Exception as e:
-            error_count += 1
-            print(f"[Index Error] {doc.get('source', 'unknown')} -> {str(e)}")
-
-    vector_store.add(vectors, metadata)
-
-    indexing_status.update({
-        "running": False,
-        "docs": doc_count,
-        "chunks": chunk_count,
-        "errors": error_count
-    })
-
 
 # =========================================================
 # GRAPH SEED
@@ -153,11 +77,11 @@ def build_plugin_index():
 # =========================================================
 
 async def init_control_plane():
-
     build_graph_seed()
     build_plugin_index()
-    await build_index()
 
+    # Wire the control plane immediately with an empty index so the server
+    # is READY for non-RAG requests while indexing runs in the background.
     CONTROL_PLANE.init(
         vector_store=vector_store,
         graph_store=graph_store,
@@ -203,8 +127,7 @@ def health():
 def status():
     return {
         "control_plane": CONTROL_PLANE.status(),
-        "indexing": indexing_status,
-        "repos_loaded": len(REPOS),
+        "index_vectors": vector_store.index.ntotal if vector_store.index else 0,
         "graph_edges": len(graph_store.edges),
         "plugins_loaded": len(plugin_index.docs)
     }
