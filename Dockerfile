@@ -60,7 +60,8 @@ RUN printf 'server {\n\
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    REPO_BASE=/repos
 
 EXPOSE 8082 5173
 

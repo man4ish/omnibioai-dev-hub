@@ -14,7 +14,7 @@ mock_st.__spec__ = MagicMock()
 sys.modules['sentence_transformers'] = mock_st
 
 # Mock dependencies at their source to avoid issues during import of api.main
-with patch("index.vector_store.VectorStore"),      patch("embeddings.embedder.Embedder"),      patch("index.graph_store.GraphStore"),      patch("index.plugin_index.PluginIndex"):
+with patch("index.vector_store.VectorStore"),      patch("index.graph_store.GraphStore"),      patch("index.plugin_index.PluginIndex"):
     from api.main import app
 
 client = TestClient(app)
@@ -28,10 +28,10 @@ def test_health_endpoint():
 def test_status_endpoint():
     with patch("api.main.CONTROL_PLANE.status", return_value={"status": "READY"}):
         with patch("api.main.graph_store") as mock_gs:
-            mock_gs.edges = [1, 2, 3]
+            mock_gs.size.return_value = {"nodes": 3, "edges": 4}
             response = client.get("/status")
             assert response.status_code == 200
-            assert response.json()["graph_edges"] == 3
+            assert response.json()["graph_edges"] == 4
 
 @pytest.mark.asyncio
 async def test_wait_for_ollama_success():

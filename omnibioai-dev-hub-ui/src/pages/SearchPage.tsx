@@ -1,10 +1,17 @@
-import { useState } from "react";
-import { ragQuery } from "../api/client";
+import { useState, useEffect } from "react";
+import { ragQuery, getStatus } from "../api/client";
 
 export default function SearchPage() {
   const [q, setQ] = useState("");
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [indexVectors, setIndexVectors] = useState<number | null>(null);
+
+  useEffect(() => {
+    getStatus()
+      .then((s) => setIndexVectors(s.index_vectors))
+      .catch(() => {});
+  }, []);
 
   const search = async () => {
     if (!q.trim()) return;
@@ -30,7 +37,7 @@ export default function SearchPage() {
     <>
       <div className="page-header">
         <div className="page-title">Vector Search</div>
-        <div className="page-sub">Semantic search across 1.2M embeddings · FAISS IndexFlatIP</div>
+        <div className="page-sub">Semantic search across {indexVectors != null ? indexVectors.toLocaleString() : "…"} embeddings · FAISS IndexFlatIP</div>
       </div>
 
       <div className="search-bar-row">

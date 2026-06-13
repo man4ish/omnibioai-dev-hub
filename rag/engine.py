@@ -1,7 +1,8 @@
 import os
+import json
 import requests
 import numpy as np
-from typing import List, Dict, Any
+from typing import Generator, List, Dict, Any
 
 
 # =========================================================
@@ -179,9 +180,35 @@ Answer clearly, technically, and concisely:
             "query": query,
             "answer": response,
             "sources": [d.get("source") for d in docs],
+            "context": docs,
             "context_used": len(docs),
             "version": "v6-faiss"
         }
+
+    # =====================================================
+    # TOKEN STREAMING (Ollama stream=True NDJSON)
+    # =====================================================
+    def stream_llm(self, query: str, context: str) -> Generator[str, None, None]:
+        prompt = self.build_prompt(query, context)
+        try:
+            res = requests.post(
+                f"{OLLAMA_URL}/generate",
+                json={"model": "llama3", "prompt": prompt, "stream": True},
+                stream=True,
+                timeout=300,
+            )
+            res.raise_for_status()
+            for line in res.iter_lines():
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                token = chunk.get("response", "")
+                if token:
+                    yield token
+                if chunk.get("done"):
+                    break
+        except Exception as e:
+            yield f"[LLM_ERROR] {str(e)}"
 
     # =====================================================
     # FASTAPI COMPATIBILITY

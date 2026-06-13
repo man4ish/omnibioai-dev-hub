@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -7,8 +9,6 @@ import logging
 from api.routes import rag
 
 from index.vector_store import VectorStore
-from embeddings.embedder import Embedder
-
 from index.graph_store import GraphStore
 from index.plugin_index import PluginIndex
 
@@ -42,10 +42,10 @@ app.add_middleware(
 # =========================================================
 
 vector_store = VectorStore()
-loaded = vector_store.load("data/faiss_index")
+_INDEX_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "faiss_index")
+loaded = vector_store.load(_INDEX_DIR)
 if not loaded:
     logger.warning("No persisted FAISS index found; will build from scratch on startup")
-embedder = Embedder()
 graph_store = GraphStore()
 plugin_index = PluginIndex([])
 
@@ -77,16 +77,13 @@ def build_plugin_index():
 # =========================================================
 
 async def init_control_plane():
-    build_graph_seed()
-    build_plugin_index()
-
-    # Wire the control plane immediately with an empty index so the server
-    # is READY for non-RAG requests while indexing runs in the background.
+    # Seeding is owned by CONTROL_PLANE._build() to avoid double-seeding.
+    # build_graph_seed() and build_plugin_index() are kept for test compatibility
+    # but are not called here.
     CONTROL_PLANE.init(
         vector_store=vector_store,
         graph_store=graph_store,
         plugin_index=plugin_index,
-        embedder=embedder
     )
 
 
@@ -125,11 +122,22 @@ def health():
 
 @app.get("/status")
 def status():
+    repos_loaded = 0
+    if vector_store.metadata:
+        repo_names: set = set()
+        for m in vector_store.metadata:
+            for part in m.get("source", "").split("/"):
+                if part.startswith("omnibioai"):
+                    repo_names.add(part)
+                    break
+        repos_loaded = len(repo_names)
+
     return {
         "control_plane": CONTROL_PLANE.status(),
         "index_vectors": vector_store.index.ntotal if vector_store.index else 0,
-        "graph_edges": len(graph_store.edges),
-        "plugins_loaded": len(plugin_index.docs)
+        "graph_edges": graph_store.size()["edges"],
+        "plugins_loaded": len(plugin_index.docs),
+        "repos_loaded": repos_loaded,
     }
 
 

@@ -10,6 +10,8 @@ from rag.engine import ollama_embed   # SINGLE SOURCE OF TRUTH
 from ingestion.doc_loader import load_documents
 from processing.chunker import chunk_text
 
+MIN_CHUNK_CHARS = 10  # discard overflow tails from chunker.py's hard char-slice
+
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -32,7 +34,11 @@ def build_index():
 
     vector_store = VectorStore()
 
-    REPO_BASE = os.environ.get("REPO_BASE", "/repos")
+    # BUG-1 FIX: default to the actual local machine path.
+    # In Docker the image sets ENV REPO_BASE=/repos (volume mount).
+    # Locally: export REPO_BASE=/home/manish/Desktop/machine (or set in .env).
+    REPO_BASE = os.environ.get("REPO_BASE", "/home/manish/Desktop/machine")
+
     repos = [
         f"{REPO_BASE}/omnibioai",
         f"{REPO_BASE}/omnibioai-rag",
@@ -55,47 +61,73 @@ def build_index():
         f"{REPO_BASE}/omnibioai-hpc-policy-engine",
     ]
 
-    docs = load_documents(repos)
+    # Fail fast: if not a single repo exists, the REPO_BASE is wrong.
+    existing = [r for r in repos if os.path.isdir(r)]
+    if not existing:
+        raise SystemExit(
+            f"\n❌  No repos found under REPO_BASE={REPO_BASE!r}\n"
+            f"    Set REPO_BASE to the directory that contains the omnibioai-* repos.\n"
+            f"    Example:  export REPO_BASE=/home/manish/Desktop/machine\n"
+            f"    Docker:   -e REPO_BASE=/repos  (with repos volume mounted at /repos)\n"
+        )
+
+    missing = [os.path.basename(r) for r in repos if not os.path.isdir(r)]
+    if missing:
+        print(f"⚠️  {len(missing)} repos not found, will be skipped: {missing}")
 
     all_vectors = []
     all_meta = []
-    seen_hashes = set()
 
-    stats = {"skipped": 0, "new": 0, "chunks_indexed": 0}
+    stats = {"too_short": 0, "deduped": 0, "embed_failed": 0, "new": 0, "chunks_indexed": 0}
 
-    for doc in docs:
-
-        text = doc.get("text", "")
-        if not text:
+    # BUG-2 FIX: seen_hashes is reset per repo so cross-repo identical chunks
+    # are each indexed under their own source path.  Within a single repo,
+    # dedup still fires to avoid storing the same paragraph twice (e.g. a
+    # shared boilerplate section that appears in multiple plugin READMEs).
+    for repo_path in repos:
+        if not os.path.isdir(repo_path):
             continue
 
-        for chunk in chunk_text(text):
+        seen_hashes: set = set()
+        repo_docs = load_documents([repo_path])
 
-            h = hash_text(chunk)
+        for doc in repo_docs:
 
-            if h in seen_hashes:
-                stats["skipped"] += 1
+            text = doc.get("text", "")
+            if not text:
                 continue
 
-            seen_hashes.add(h)
-            stats["new"] += 1
+            for chunk in chunk_text(text):
 
-            try:
-                vec = ollama_embed(chunk)   # <<< SINGLE EMBEDDING SOURCE
-                vec = normalize_vector(vec)
-            except Exception as e:
-                print(f"⚠️  Skipping chunk from {doc.get('source')}: {e}")
-                stats["skipped"] += 1
-                continue
+                if len(chunk) < MIN_CHUNK_CHARS:
+                    stats["too_short"] += 1
+                    continue
 
-            all_vectors.append(vec)
-            all_meta.append({
-                "text": chunk,
-                "source": doc.get("source", "unknown"),
-                "hash": h
-            })
+                h = hash_text(chunk)
 
-            stats["chunks_indexed"] += 1
+                if h in seen_hashes:
+                    stats["deduped"] += 1
+                    continue
+
+                seen_hashes.add(h)
+                stats["new"] += 1
+
+                try:
+                    vec = ollama_embed(chunk)   # <<< SINGLE EMBEDDING SOURCE
+                    vec = normalize_vector(vec)
+                except Exception as e:
+                    print(f"⚠️  Skipping chunk from {doc.get('source')}: {e}")
+                    stats["embed_failed"] += 1
+                    continue
+
+                all_vectors.append(vec)
+                all_meta.append({
+                    "text": chunk,
+                    "source": doc.get("source", "unknown"),
+                    "hash": h
+                })
+
+                stats["chunks_indexed"] += 1
 
     if not all_vectors:
         print("⚠️ No vectors generated")

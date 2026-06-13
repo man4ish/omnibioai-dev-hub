@@ -1,5 +1,3 @@
-Here is an updated production-style README for your V6 FAISS-native RAG system.
-
 # OmniBioAI Dev Hub — RAG V6
 
 Production-grade Retrieval-Augmented Generation (RAG) system powering the OmniBioAI ecosystem documentation, architecture search, workflow discovery, and developer assistant APIs.
@@ -8,17 +6,15 @@ Production-grade Retrieval-Augmented Generation (RAG) system powering the OmniBi
 
 # Features
 
-* FAISS-native vector search
-* Incremental indexing
-* Ollama local embeddings + local LLM inference
+* FAISS-native vector search (IndexFlatIP, 768-dim)
+* Incremental per-repo indexing with hash-based dedup
+* Ollama local embeddings (`nomic-embed-text`) + local LLM inference (`llama3`)
 * FastAPI API server
-* Streaming responses (SSE)
-* Chunk-level document retrieval
-* Repository-wide multi-project indexing
-* Fully local execution
-* No OpenAI dependency
+* Real token-level SSE streaming via Ollama `stream: true`
+* Chunk-level document retrieval with source attribution
+* Repository-wide multi-project indexing (19 repos)
+* Fully local execution — no OpenAI dependency
 * Production-safe embedding normalization
-* Hybrid-ready architecture
 * V6 dimension consistency enforcement
 
 ---
@@ -26,21 +22,21 @@ Production-grade Retrieval-Augmented Generation (RAG) system powering the OmniBi
 # Architecture
 
 ```text
-Repositories
+Repositories  (REPO_BASE/omnibioai-*)
      ↓
-Document Loader
+Document Loader  (ingestion/doc_loader.py)
      ↓
-Chunker
+Chunker  (processing/chunker.py, 500-word windows / 2000-char max)
      ↓
-Ollama Embeddings (768-d)
+Ollama Embeddings  (nomic-embed-text, 768-d, normalized)
      ↓
-FAISS Vector Index
+FAISS Vector Index  (IndexFlatIP, data/faiss_index/)
      ↓
-RAG Engine
+RAG Engine  (rag/engine.py)
      ↓
-FastAPI API
+FastAPI API  (api/main.py + api/routes/rag.py)
      ↓
-LLM Answer Generation
+LLM Answer Generation  (llama3 via Ollama, blocking or token-streamed)
 ```
 
 ---
@@ -83,27 +79,11 @@ This caused FAISS assertion failures:
 AssertionError: d == self.d
 ```
 
----
+### V6 Fix
 
-## V6 Fix
+Both ingestion (`scripts/build_index.py`) and retrieval (`rag/engine.py`) now call the same `ollama_embed("nomic-embed-text")` function — the single source of truth.
 
-Now BOTH ingestion and retrieval use:
-
-```text
-nomic-embed-text
-```
-
-Dimension:
-
-```text
-768
-```
-
-This guarantees:
-
-* stable retrieval
-* no dimension mismatch
-* deterministic FAISS behavior
+`embeddings/embedder.py` (sentence-transformers, 384-dim) is retained for test coverage only and is not on any live request path.
 
 ---
 
@@ -113,29 +93,41 @@ This guarantees:
 omnibioai-dev-hub/
 │
 ├── api/
-│   ├── main.py
+│   ├── main.py              # FastAPI app, startup, /status, /health
 │   └── routes/
+│       └── rag.py           # /rag/query and /rag/stream endpoints
 │
 ├── rag/
-│   ├── engine.py
-│   └── control_plane.py
+│   ├── engine.py            # RAGEngine: retrieve, build_context, answer, stream_llm
+│   └── control_plane.py     # Singleton lifecycle manager
 │
 ├── index/
-│   └── vector_store.py
+│   ├── vector_store.py      # FAISS wrapper (add, search, save, load)
+│   ├── graph_store.py       # In-memory knowledge graph (BFS expansion)
+│   └── plugin_index.py      # Plugin doc registry
 │
 ├── embeddings/
-│   └── embedder.py
+│   └── embedder.py          # SentenceTransformer wrapper (tests only, not live)
+│
+├── retrieval/
+│   └── retriever.py         # Retriever class (tests only, not live)
 │
 ├── ingestion/
-│   └── doc_loader.py
+│   └── doc_loader.py        # Markdown document loader with SKIP_DIRS/SKIP_PATH_SEGMENTS
 │
 ├── processing/
-│   └── chunker.py
+│   └── chunker.py           # 500-word / 2000-char chunker
 │
 ├── scripts/
-│   └── build_index.py
+│   └── build_index.py       # Index builder entry point
 │
-└── data/
+├── data/
+│   └── faiss_index/         # index.faiss + metadata.pkl (gitignored)
+│
+├── configs/
+│   └── repos.yaml           # Repo list documentation
+│
+└── .env.example             # Environment variable template
 ```
 
 ---
@@ -147,8 +139,10 @@ omnibioai-dev-hub/
 Recommended:
 
 ```text
-Python 3.11
+Python 3.11 or 3.12
 ```
+
+> **Note:** Python 3.13 removes `numpy.distutils`, breaking `faiss-cpu`. Use 3.11 or 3.12. In Docker the provided image uses Python 3.12.
 
 ---
 
@@ -170,20 +164,19 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull nomic-embed-text
 ```
 
-### Generation Models
+### Generation Model
 
-Recommended:
-
-```bash
-ollama pull mistral
-```
-
-Optional:
+The system uses `llama3` by default (hardcoded in `rag/engine.py`):
 
 ```bash
 ollama pull llama3
+```
+
+Optional alternatives (change `model=` in `engine.py` if needed):
+
+```bash
+ollama pull mistral
 ollama pull deepseek-coder
-ollama pull deepseek-r1
 ```
 
 ---
@@ -193,8 +186,8 @@ ollama pull deepseek-r1
 ## Create Environment
 
 ```bash
-conda create -n chemoinfo python=3.11 -y
-conda activate chemoinfo
+conda create -n omnibioai-dev-hub python=3.12 -y
+conda activate omnibioai-dev-hub
 ```
 
 ---
@@ -202,7 +195,42 @@ conda activate chemoinfo
 ## Install Dependencies
 
 ```bash
-pip install fastapi uvicorn requests numpy faiss-cpu sentence-transformers
+pip install fastapi uvicorn requests numpy faiss-cpu
+```
+
+> `sentence-transformers` is only required to run the test suite (`tests/test_embeddings.py`, `tests/test_retriever.py`). It is not needed to run the server or build the index:
+> ```bash
+> pip install sentence-transformers  # tests only
+> ```
+
+---
+
+# Configuration
+
+## REPO_BASE
+
+`REPO_BASE` is the only required configuration. It must point to the directory that contains the `omnibioai-*` repos as immediate children.
+
+```bash
+export REPO_BASE=/home/manish/Desktop/machine
+```
+
+The indexer **exits immediately with a clear error** if no repos are found under `REPO_BASE`:
+
+```text
+❌  No repos found under REPO_BASE='/some/wrong/path'
+    Set REPO_BASE to the directory that contains the omnibioai-* repos.
+    Example:  export REPO_BASE=/home/manish/Desktop/machine
+    Docker:   -e REPO_BASE=/repos  (with repos volume mounted at /repos)
+```
+
+In Docker the image sets `ENV REPO_BASE=/repos` automatically — no action needed.
+
+Copy `.env.example` to `.env` for local development:
+
+```bash
+cp .env.example .env
+# edit REPO_BASE as needed
 ```
 
 ---
@@ -212,7 +240,7 @@ pip install fastapi uvicorn requests numpy faiss-cpu sentence-transformers
 ## Clean Existing Data
 
 ```bash
-rm -rf data/*
+rm -rf data/faiss_index/*
 ```
 
 ---
@@ -227,8 +255,56 @@ Expected output:
 
 ```text
 🚀 Incremental V6 Indexing Starting...
+⚠️  2 repos not found, will be skipped: ['omnibioai-security-audit', 'omnibioai-hpc-policy-engine']
+📄 Loaded N documents
+...
+💾 Index saved to .../data/faiss_index (2067 vectors)
 ✅ V6 Index Complete
+{'too_short': 3, 'deduped': 10, 'embed_failed': 0, 'new': 2067, 'chunks_indexed': 2067}
 ```
+
+### How deduplication works
+
+`seen_hashes` is **reset per repo** so cross-repo identical chunks each get their own index entry under their canonical source path. Within a single repo, duplicate chunks (e.g. shared boilerplate across plugin READMEs) are deduplicated.
+
+Chunks shorter than 10 characters are discarded (`MIN_CHUNK_CHARS = 10`) to eliminate overflow tails produced by the hard character-slice in `chunker.py`.
+
+### Excluded paths
+
+`ingestion/doc_loader.py` skips the following during the walk:
+
+**By directory name (`SKIP_DIRS`):**
+
+```python
+SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".pytest_cache", "obsolete"}
+```
+
+Note: both `.venv` and bare `venv` are excluded. `.pytest_cache` is excluded because it contains auto-generated `README.md` stubs (present in 17 of the 19 repos) that would otherwise pollute the index with boilerplate.
+
+**By path segment (`SKIP_PATH_SEGMENTS`):**
+
+```python
+SKIP_PATH_SEGMENTS = {"work"}
+```
+
+This excludes `omnibioai/work/` which contains UUID-named runtime copies of workflow bundle READMEs. Without this exclusion, those copies would claim index slots before the canonical `omnibioai-workflow-bundles/` paths are processed, causing all 50 bundles to appear indexed under `omnibioai/work/` instead.
+
+---
+
+# Current Index Stats
+
+As of 2026-06-13 (third full rebuild):
+
+| Metric | Value |
+|--------|-------|
+| Total vectors | 2,067 |
+| Unique source files | ~965 |
+| Repos indexed | 17 of 19 |
+| Workflow bundles covered | 50 / 50 |
+| Chunks filtered (too short) | 3 |
+| Cross-repo deduped | 10 |
+
+Missing repos (not present on disk): `omnibioai-security-audit`, `omnibioai-hpc-policy-engine`. The indexer skips them with a warning and continues.
 
 ---
 
@@ -238,14 +314,16 @@ Expected output:
 uvicorn api.main:app --host 0.0.0.0 --port 8082 --reload
 ```
 
+In Docker the server starts automatically as PID 1.
+
 ---
 
 # Test Query API
 
 ```bash
 curl -X POST http://localhost:8082/rag/query \
--H "Content-Type: application/json" \
--d '{"query":"What is workflow engine in OmniBioAI?"}'
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is workflow engine in OmniBioAI?"}'
 ```
 
 Example response:
@@ -255,7 +333,10 @@ Example response:
   "query": "What is workflow engine in OmniBioAI?",
   "answer": "According to the provided context...",
   "sources": [
-    "../omnibioai-workflow-bundles/README.md"
+    "/repos/omnibioai-workflow-bundles/README.md"
+  ],
+  "context": [
+    {"score": 0.87, "text": "...", "source": "/repos/omnibioai-workflow-bundles/README.md"}
   ],
   "context_used": 5,
   "version": "v6-faiss",
@@ -273,11 +354,75 @@ Endpoint:
 POST /rag/stream
 ```
 
-Uses:
+Body: `{"query": "your question"}`
 
-* Server-Sent Events (SSE)
-* token streaming
-* real-time generation
+### How it works
+
+1. The server retrieves the top-5 chunks from FAISS (same path as `/rag/query`).
+2. It builds the prompt from the retrieved context.
+3. It calls Ollama's `/api/generate` with `"stream": true`.
+4. Ollama returns newline-delimited JSON (NDJSON), one object per token:
+   ```json
+   {"model":"llama3","response":"Based","done":false}
+   {"model":"llama3","response":" on","done":false}
+   ...
+   {"model":"llama3","response":"","done":true}
+   ```
+5. Each token is immediately forwarded as an SSE event:
+   ```text
+   data: {"type": "token", "content": "Based"}
+
+   data: {"type": "token", "content": " on"}
+
+   ...
+
+   data: {"type": "done"}
+   ```
+
+### Client-side consumption
+
+```typescript
+ragStream(
+  "your query",
+  (token) => appendToUI(token),      // called per token
+  () => markComplete(),               // called on done
+  (err) => showError(err)            // called on error
+);
+```
+
+The UI client (`src/api/client.ts`) parses the `data:` envelope and dispatches `type: "token"` and `type: "done"` events.
+
+---
+
+# Supported Repositories
+
+The indexer targets 19 repositories. All paths are relative to `REPO_BASE`:
+
+```python
+repos = [
+    "omnibioai",                  # main platform repo
+    "omnibioai-rag",
+    "omnibioai-toolserver",
+    "omnibioai-sdk",
+    "omnibioai-workflow-bundles",  # 50 workflow bundle subdirectories
+    "omnibioai-control-center",
+    "omnibioai-lims",
+    "omnibioai-model-registry",
+    "omnibioai-dev-docker",
+    "omnibioai-api-gateway",
+    "omnibioai-docs",
+    "omnibioai-studio",
+    "omnibioai-auth",
+    "omnibioai-tool-runtime",
+    "omnibioai-iam-client",
+    "omnibioai-policy-engine",
+    "omnibioai-security-sdk",
+    "omnibioai-security-audit",       # not present on disk — skipped with warning
+    "omnibioai-hpc-policy-engine",    # not present on disk — skipped with warning
+]
+```
+
+The two missing repos are skipped gracefully at build time. When they become available, no code change is needed — just add them to the directory.
 
 ---
 
@@ -285,7 +430,9 @@ Uses:
 
 ## Step 1 — Chunking
 
-Documents are split into semantic chunks.
+Documents are split using a 500-word sliding window, hard-capped at 2000 characters per chunk. Chunks shorter than 10 characters are discarded.
+
+> **Known limitation:** The hard character slice at 2000 chars can produce 1–2 word overflow fragments at word boundaries (e.g. "onment", "abases"). These are above the 10-char filter threshold. A future fix will snap the slice to the nearest word boundary. See *Future Work* below.
 
 ---
 
@@ -294,13 +441,7 @@ Documents are split into semantic chunks.
 Each chunk is embedded using:
 
 ```text
-nomic-embed-text
-```
-
-Output dimension:
-
-```text
-768
+nomic-embed-text  (768-dim, L2-normalized)
 ```
 
 ---
@@ -313,49 +454,31 @@ Vectors are stored in:
 faiss.IndexFlatIP
 ```
 
+Pre-normalized vectors make inner product equivalent to cosine similarity.
+
 ---
 
 ## Step 4 — Query Embedding
 
-User query is embedded using the SAME embedding model.
+User query is embedded using the same `nomic-embed-text` model at query time.
 
 ---
 
 ## Step 5 — Vector Search
 
-FAISS retrieves nearest chunks.
+FAISS retrieves the top-5 nearest chunks (configurable via `top_k`).
 
 ---
 
 ## Step 6 — Prompt Assembly
 
-Retrieved chunks become context.
+Retrieved chunks become the context block in a structured prompt.
 
 ---
 
 ## Step 7 — LLM Generation
 
-Prompt sent to local Ollama model.
-
----
-
-# Supported Repositories
-
-Current indexing targets:
-
-```python
-repos = [
-    "../omnibioai",
-    "../omnibioai-rag",
-    "../omnibioai-toolserver",
-    "../omnibioai-sdk",
-    "../omnibioai-workflow-bundles",
-    "../omnibioai-control-center",
-    "../omnibioai-lims",
-    "../omnibioai-model-registry",
-    "../omnibioai-dev-docker"
-]
-```
+Prompt sent to local Ollama `llama3` model, either blocking (`/rag/query`) or token-streamed (`/rag/stream`).
 
 ---
 
@@ -365,22 +488,51 @@ repos = [
 
 * brute-force cosine scan
 * slow retrieval
-* dimension mismatch bugs
+* embedding dimension mismatch
 * unstable indexing
-
----
+* global dedup silencing canonical paths
 
 ## After V6
 
-* FAISS-native retrieval
-* stable dimensions
-* fast semantic search
+* FAISS-native inner product retrieval
+* stable 768-dim pipeline end-to-end
+* per-repo dedup with canonical path preservation
+* real SSE token streaming
 * local-only execution
-* scalable architecture
 
 ---
 
 # Troubleshooting
+
+## REPO_BASE not set or wrong path
+
+Symptom:
+
+```text
+❌  No repos found under REPO_BASE='/repos'
+```
+
+Cause: `REPO_BASE` defaults to `/home/manish/Desktop/machine` locally and `/repos` in Docker. If neither is correct, set it explicitly:
+
+```bash
+export REPO_BASE=/path/to/parent/of/omnibioai-repos
+python scripts/build_index.py
+```
+
+---
+
+## Index loads but all queries return empty results
+
+Cause: The index on disk was built with a different embedding model or dimension. The loaded vectors won't match query vectors.
+
+Fix: Delete and rebuild:
+
+```bash
+rm data/faiss_index/index.faiss data/faiss_index/metadata.pkl
+python scripts/build_index.py
+```
+
+---
 
 ## FAISS Dimension Mismatch
 
@@ -390,13 +542,7 @@ Error:
 AssertionError: d == self.d
 ```
 
-Cause:
-
-Different embedding models used during indexing vs querying.
-
-Fix:
-
-Rebuild index using the SAME embedding model.
+Cause: Different embedding models used during indexing vs querying (the pre-V6 problem). Rebuild the index — V6 enforces 768-dim at both stages.
 
 ---
 
@@ -408,62 +554,47 @@ Error:
 Read timed out
 ```
 
-Fix:
-
-Use a smaller generation model:
+Fix: Use a smaller generation model. Change the `model=` argument in `rag/engine.py`:
 
 ```python
-model="mistral"
-```
-
-instead of:
-
-```python
-deepseek-r1
+model="mistral"  # faster than llama3 on smaller hardware
 ```
 
 ---
 
 ## Empty Retrieval Results
 
-Check:
+Verify the index loaded correctly:
 
 ```bash
 python -c "
 from index.vector_store import VectorStore
-import numpy as np
-
 vs = VectorStore()
-vs.add([np.random.rand(768)], [{'text':'test'}])
-
-print(vs.index.ntotal)
+vs.load('data/faiss_index')
+print('ntotal:', vs.index.ntotal if vs.index else 'no index')
 "
 ```
 
-Expected:
-
-```text
-1
-```
+Expected: `ntotal: 2067` (or your current count).
 
 ---
 
-# Future Roadmap
+# Known Limitations / Future Work
+
+## Chunker word-wrap (planned)
+
+`chunker.py` slices at a hard 2000-character boundary without snapping to word boundaries. This produces 1–2 word fragments at the tail of some documents (e.g. "onment", "abases" — 16–18 chars, above the `MIN_CHUNK_CHARS=10` filter). These fragments are harmless but pollute the index with low-information chunks. The fix is to snap the slice to the nearest preceding space.
 
 ## Planned V7 Features
 
-* IVF indexes
-* HNSW search
-* metadata filtering
-* hybrid BM25 + vector search
-* reranking
-* cross-encoder scoring
-* persistent FAISS storage
-* multi-user collections
-* distributed indexing
-* workflow-aware retrieval
-* graph RAG
-* plugin-aware retrieval
+* Chunker word-boundary snapping
+* IVF or HNSW indexes for million-scale corpora
+* BM25 hybrid search
+* Metadata filtering (by repo, file type, date)
+* Cross-encoder reranking
+* Distributed / incremental index updates
+* Graph RAG (graph store already seeded)
+* Plugin-aware retrieval
 
 ---
 

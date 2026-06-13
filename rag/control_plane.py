@@ -32,7 +32,6 @@ class ControlPlane:
         self.vector_store = None
         self.graph_store = None
         self.plugin_index = None
-        self.embedder = None
 
         # engine
         self.engine = None
@@ -41,7 +40,7 @@ class ControlPlane:
     # INIT
     # =========================================================
 
-    def init(self, vector_store, graph_store, plugin_index, embedder):
+    def init(self, vector_store, graph_store, plugin_index):
 
         with self.lock:
             if self._initialized:
@@ -53,7 +52,6 @@ class ControlPlane:
             self.vector_store = vector_store
             self.graph_store = graph_store
             self.plugin_index = plugin_index
-            self.embedder = embedder
 
             self.state.metrics["init_time"] = time.time()
 
@@ -105,9 +103,10 @@ class ControlPlane:
         if not self.graph_store:
             return
 
-        self.graph_store.add_edge("RAG", "VectorStore", "uses")
-        self.graph_store.add_edge("RAG", "GraphStore", "augments")
-        self.graph_store.add_edge("OmniBioAI", "ControlPlane", "manages")
+        self.graph_store.add_edge("OmniBioAI", "RAG Engine", "powers")
+        self.graph_store.add_edge("RAG Engine", "Vector Store", "uses")
+        self.graph_store.add_edge("RAG Engine", "Graph Store", "augments")
+        self.graph_store.add_edge("Plugin System", "Workflow Engine", "drives")
 
     # =========================================================
     # PLUGIN SEED
@@ -118,14 +117,11 @@ class ControlPlane:
         if not self.plugin_index:
             return
 
-        if not hasattr(self.plugin_index, "docs") or self.plugin_index.docs is None:
-            self.plugin_index.docs = []
-
-        self.plugin_index.docs.extend([
-            {"text": "workflow builder DAG execution engine", "plugin": "workflow"},
-            {"text": "qc_plots generates sequencing QC reports", "plugin": "qc"},
-            {"text": "plugin executor runs pipelines", "plugin": "executor"}
-        ])
+        self.plugin_index.docs = [
+            {"text": "workflow_builder manages DAG pipelines", "plugin": "workflow_builder"},
+            {"text": "plugin_executor runs bioinformatics workflows", "plugin": "plugin_executor"},
+            {"text": "qc_plots generates sequencing QC reports", "plugin": "qc_plots"},
+        ]
 
     # =========================================================
     # STATUS
