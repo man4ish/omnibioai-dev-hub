@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, mock_open
 import sys
 
 # Mock faiss
@@ -87,5 +87,55 @@ def test_search_invalid_indices(vs):
     mock_index.search.return_value = (np.array([[0.9]]), np.array([[-1]]))
     vs.index = mock_index
     vs.metadata = []
-    
+
     assert vs.search([0.1]*768) == []
+
+
+# ------------------------------------------------------------------
+# save / load
+# ------------------------------------------------------------------
+
+def test_save_raises_when_empty(vs):
+    with pytest.raises(RuntimeError, match="index is empty"):
+        vs.save("/tmp/vs_test")
+
+
+def test_save_success(vs):
+    mock_index = MagicMock()
+    mock_index.ntotal = 2
+    vs.index = mock_index
+    vs.dim = 768
+    vs.metadata = [{"text": "a"}, {"text": "b"}]
+
+    with patch("os.makedirs") as mock_mkdirs, \
+         patch("builtins.open", mock_open()) as mock_file, \
+         patch("pickle.dump") as mock_pdump:
+        mock_faiss.write_index = MagicMock()
+        vs.save("/tmp/vs_test")
+
+    mock_mkdirs.assert_called_once_with("/tmp/vs_test", exist_ok=True)
+    mock_faiss.write_index.assert_called_once()
+    mock_pdump.assert_called_once()
+
+
+def test_load_returns_false_when_missing(vs):
+    with patch("os.path.exists", return_value=False):
+        result = vs.load("/tmp/no_such_dir")
+    assert result is False
+
+
+def test_load_success(vs):
+    saved_data = {"metadata": [{"text": "x", "source": "s1"}], "dim": 768}
+    mock_loaded_index = MagicMock()
+    mock_loaded_index.ntotal = 1
+
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", mock_open()), \
+         patch("pickle.load", return_value=saved_data) as mock_pload:
+        mock_faiss.read_index = MagicMock(return_value=mock_loaded_index)
+        result = vs.load("/tmp/vs_test")
+
+    assert result is True
+    assert vs.dim == 768
+    assert vs.metadata == saved_data["metadata"]
+    assert vs.index is mock_loaded_index
