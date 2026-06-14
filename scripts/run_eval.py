@@ -45,22 +45,25 @@ def run_eval(index_dir: str, eval_path: str):
     col_q = max(len(c["query"]) for c in cases)
     col_q = min(col_q, 70)
 
-    print(f"\n{'Query':<{col_q}}  {'Result':<6}  {'Matched source'}")
-    print("-" * (col_q + 50))
+    print(f"\n{'Query':<{col_q}}  {'Scope':<18}  {'Result':<6}  {'Matched source'}")
+    print("-" * (col_q + 80))
 
     passed = 0
     for case in cases:
         query = case["query"]
         expected = case["expected_source_contains"]
-        notes = case.get("notes", "")
+        repo = case.get("repo")
+        bundle = case.get("bundle")
+
+        scope_label = f"bundle={bundle}" if bundle else (f"repo={repo}" if repo else "-")
 
         try:
-            docs = engine.retrieve(query, top_k=TOP_K)
+            docs = engine.retrieve(query, top_k=TOP_K, repo=repo, bundle=bundle)
         except Exception as e:
             label = FAIL_MARKER
             matched = f"[ERROR] {e}"
-            results.append({"query": query, "passed": False, "matched": matched})
-            print(f"{query[:col_q]:<{col_q}}  {label:<6}  {matched}")
+            results.append({"query": query, "passed": False, "matched": matched, "expected": expected})
+            print(f"{query[:col_q]:<{col_q}}  {scope_label:<18}  {label:<6}  {matched}")
             continue
 
         sources = [d.get("source", "") for d in docs]
@@ -75,7 +78,7 @@ def run_eval(index_dir: str, eval_path: str):
             matched = sources[0] if sources else "(no results)"
 
         results.append({"query": query, "passed": bool(hit), "matched": matched, "expected": expected})
-        print(f"{query[:col_q]:<{col_q}}  {label:<6}  {matched}")
+        print(f"{query[:col_q]:<{col_q}}  {scope_label:<18}  {label:<6}  {matched}")
 
     total = len(cases)
     recall_at_5 = passed / total if total else 0.0

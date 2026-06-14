@@ -103,15 +103,22 @@ class RAGEngine:
     # =====================================================
     # RETRIEVAL (FAISS ONLY)
     # =====================================================
-    def retrieve(self, query: str, top_k: int = 5):
+    def retrieve(self, query: str, top_k: int = 5, repo: str = None, bundle: str = None):
 
         query_vec = self._embed(query).reshape(1, -1)
 
-        index = getattr(self.vector_store, "index", None)
-        metadata = getattr(self.vector_store, "metadata", [])
+        vs = self.vector_store
+        index = getattr(vs, "index", None)
+        metadata = getattr(vs, "metadata", [])
 
         if index is None or index.ntotal == 0:
             return []
+
+        # Route through filter_search when a scope is requested
+        if (repo is not None or bundle is not None) and hasattr(vs, "filter_search"):
+            field = "bundle" if bundle is not None else "repo"
+            value = bundle if bundle is not None else repo
+            return vs.filter_search(query_vec, top_k, field=field, value=value)
 
         scores, indices = index.search(query_vec, top_k)
 
@@ -165,9 +172,9 @@ Answer clearly, technically, and concisely:
     # =====================================================
     # MAIN PIPELINE
     # =====================================================
-    def answer(self, query: str):
+    def answer(self, query: str, repo: str = None, bundle: str = None):
 
-        docs = self.retrieve(query)
+        docs = self.retrieve(query, repo=repo, bundle=bundle)
         context = self.build_context(docs)
         prompt = self.build_prompt(query, context)
 
@@ -213,5 +220,5 @@ Answer clearly, technically, and concisely:
     # =====================================================
     # FASTAPI COMPATIBILITY
     # =====================================================
-    def query(self, question: str):
-        return self.answer(question)
+    def query(self, question: str, repo: str = None, bundle: str = None):
+        return self.answer(question, repo=repo, bundle=bundle)

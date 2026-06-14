@@ -103,6 +103,48 @@ class VectorStore:
 
         return results
 
+    def filter_search(self, query_vec, top_k: int = 5, field: str = None, value: str = None):
+        """FAISS search with post-filtering on a metadata field.
+
+        Retrieves top_k * 3 candidates from FAISS then keeps only those whose
+        metadata[field] == value, returning up to top_k results.  Falls back to
+        plain search when no filter is specified.
+        """
+        if field is None or value is None:
+            return self.search(query_vec, top_k)
+
+        if self.index is None or self.index.ntotal == 0:
+            return []
+
+        q = self._coerce_shape(query_vec)
+        if q.shape[1] != self.dim:
+            raise ValueError(
+                f"Query dimension mismatch: index expects {self.dim}-d, "
+                f"query is {q.shape[1]}-d."
+            )
+
+        k = min(top_k * 3, self.index.ntotal)
+        scores, indices = self.index.search(q, k)
+
+        results = []
+        for s, i in zip(scores[0], indices[0]):
+            if i < 0 or i >= len(self.metadata):
+                continue
+            meta = self.metadata[i]
+            if meta.get(field) != value:
+                continue
+            results.append({
+                "score": float(s),
+                "text": meta.get("text", ""),
+                "source": meta.get("source", "unknown"),
+                "repo": meta.get("repo"),
+                "bundle": meta.get("bundle"),
+            })
+            if len(results) >= top_k:
+                break
+
+        return results
+
     def save(self, directory: str):
         os.makedirs(directory, exist_ok=True)
         if self.index is None:

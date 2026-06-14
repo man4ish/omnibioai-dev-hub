@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import Optional
 import json
 import traceback
 
@@ -15,6 +16,8 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     query: str
+    repo: Optional[str] = None
+    bundle: Optional[str] = None
 
 
 # =========================================================
@@ -49,7 +52,7 @@ def query(req: QueryRequest):
         engine = get_engine()
 
         # V6 CONTRACT: only query() exists
-        result = engine.query(req.query)
+        result = engine.query(req.query, repo=req.repo, bundle=req.bundle)
 
         return {
             **result,
@@ -81,7 +84,7 @@ def stream(req: QueryRequest):
             # V6: no hybrid_retrieve dependency anymore
             # fallback-safe: reuse query pipeline structure
 
-            result = engine.retrieve(req.query)
+            result = engine.retrieve(req.query, repo=req.repo, bundle=req.bundle)
             context = engine.build_context(result)
 
             # check optional LLM streaming support

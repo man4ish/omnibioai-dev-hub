@@ -144,3 +144,56 @@ def test_query_request_validation(client):
     # Test Pydantic validation
     response = client.post("/query", json={}) # Missing 'query' field
     assert response.status_code == 422
+
+
+# =========================================================
+# SCOPED QUERY TESTS (repo / bundle params)
+# =========================================================
+
+def test_query_endpoint_with_bundle_scope(client, mock_control_plane):
+    mock_engine = MagicMock()
+    mock_engine.query.return_value = {"answer": "scoped answer"}
+    mock_control_plane.get_engine.return_value = mock_engine
+
+    response = client.post("/query", json={"query": "metagenomics", "bundle": "metagenomics"})
+
+    assert response.status_code == 200
+    mock_engine.query.assert_called_once_with(
+        "metagenomics", repo=None, bundle="metagenomics"
+    )
+
+
+def test_query_endpoint_with_repo_scope(client, mock_control_plane):
+    mock_engine = MagicMock()
+    mock_engine.query.return_value = {"answer": "repo answer"}
+    mock_control_plane.get_engine.return_value = mock_engine
+
+    response = client.post("/query", json={"query": "model versioning", "repo": "omnibioai-model-registry"})
+
+    assert response.status_code == 200
+    mock_engine.query.assert_called_once_with(
+        "model versioning", repo="omnibioai-model-registry", bundle=None
+    )
+
+
+def test_query_endpoint_unscoped_passes_none_filters(client, mock_control_plane):
+    mock_engine = MagicMock()
+    mock_engine.query.return_value = {"answer": "answer"}
+    mock_control_plane.get_engine.return_value = mock_engine
+
+    client.post("/query", json={"query": "hello"})
+
+    mock_engine.query.assert_called_once_with("hello", repo=None, bundle=None)
+
+
+def test_stream_endpoint_with_bundle_scope(client, mock_control_plane):
+    mock_engine = MagicMock()
+    mock_engine.retrieve.return_value = [{"text": "ctx"}]
+    mock_engine.build_context.return_value = "ctx"
+    mock_engine.stream_llm.return_value = ["tok"]
+    mock_control_plane.get_engine.return_value = mock_engine
+
+    response = client.post("/stream", json={"query": "q", "bundle": "metagenomics"})
+
+    assert response.status_code == 200
+    mock_engine.retrieve.assert_called_once_with("q", repo=None, bundle="metagenomics")

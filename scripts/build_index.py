@@ -88,6 +88,7 @@ def build_index():
         if not os.path.isdir(repo_path):
             continue
 
+        repo_name = os.path.basename(repo_path)
         seen_hashes: set = set()
         repo_docs = load_documents([repo_path])
 
@@ -96,6 +97,17 @@ def build_index():
             text = doc.get("text", "")
             if not text:
                 continue
+
+            source = doc.get("source", "unknown")
+
+            # Extract the first subdirectory under the repo root as the bundle.
+            # Files at the repo root (e.g. README.md) get bundle=None.
+            try:
+                rel = os.path.relpath(source, repo_path)
+                parts = rel.replace("\\", "/").split("/")
+                bundle_name = parts[0] if len(parts) > 1 else None
+            except ValueError:
+                bundle_name = None
 
             for chunk in chunk_text(text):
 
@@ -116,15 +128,17 @@ def build_index():
                     vec = ollama_embed(chunk)   # <<< SINGLE EMBEDDING SOURCE
                     vec = normalize_vector(vec)
                 except Exception as e:
-                    print(f"⚠️  Skipping chunk from {doc.get('source')}: {e}")
+                    print(f"⚠️  Skipping chunk from {source}: {e}")
                     stats["embed_failed"] += 1
                     continue
 
                 all_vectors.append(vec)
                 all_meta.append({
                     "text": chunk,
-                    "source": doc.get("source", "unknown"),
-                    "hash": h
+                    "source": source,
+                    "hash": h,
+                    "repo": repo_name,
+                    "bundle": bundle_name,
                 })
 
                 stats["chunks_indexed"] += 1

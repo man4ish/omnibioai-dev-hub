@@ -123,5 +123,35 @@
     "query": "how does the clinical trial matching pipeline score and rank patients against trial eligibility criteria",
     "expected_source_contains": "omnibioai-workflow-bundles/clinical_trial_matching",
     "notes": "clinical_trial_matching README describes genomic biomarker matching, eligibility scoring, HTML report generation"
+  },
+  {
+    "query": "what does the metagenomics nextflow pipeline use for shotgun taxonomic profiling and abundance estimation",
+    "expected_source_contains": "omnibioai-workflow-bundles/metagenomics",
+    "bundle": "metagenomics",
+    "notes": "scoped to metagenomics bundle — filters out competing microbiome/kraken sub-workflows that caused rank-6 failure unscoped"
+  },
+  {
+    "query": "how to process paired-end FASTQ files in a clinical sequencing workflow",
+    "expected_source_contains": "omnibioai-workflow-bundles/clinical",
+    "bundle": "clinical",
+    "notes": "scoped to clinical bundle — disambiguates from clinical_trial_matching and other clinical-adjacent repos"
+  },
+  {
+    "query": "CRISPR base editing screen analysis pipeline steps in functional genomics",
+    "expected_source_contains": "omnibioai-workflow-bundles/funcgen",
+    "bundle": "funcgen",
+    "notes": "scoped to funcgen bundle — avoids confusion with top-level crispr_ml and crispr bundles"
+  },
+  {
+    "query": "how to promote a model version from staging to production and resolve a model by alias",
+    "expected_source_contains": "omnibioai-model-registry",
+    "repo": "omnibioai-model-registry",
+    "notes": "repo-scoped query — model registry terminology overlaps with generic ML documentation in other repos"
+  },
+  {
+    "query": "CLIP-seq read alignment using STAR with crosslink-preserving parameters and ENCODE-compatible filters",
+    "expected_source_contains": "omnibioai-workflow-bundles/epigenomics/clip_alignment",
+    "bundle": "epigenomics",
+    "notes": "scoped to epigenomics bundle — CLIP-seq alignment terms can match general RNA-seq alignment docs"
   }
 ]

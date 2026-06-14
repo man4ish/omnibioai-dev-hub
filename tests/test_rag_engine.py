@@ -183,4 +183,77 @@ def test_engine_query(engine):
     with patch.object(engine, "answer", return_value={"ok": True}) as mock_answer:
         res = engine.query("q")
         assert res["ok"] is True
-        mock_answer.assert_called_once_with("q")
+        mock_answer.assert_called_once_with("q", repo=None, bundle=None)
+
+
+def test_engine_query_passes_scope(engine):
+    with patch.object(engine, "answer", return_value={"ok": True}) as mock_answer:
+        engine.query("q", repo="my-repo", bundle="my-bundle")
+        mock_answer.assert_called_once_with("q", repo="my-repo", bundle="my-bundle")
+
+
+@patch("rag.engine.ollama_embed")
+def test_engine_retrieve_with_bundle_filter(mock_embed, engine, mock_vector_store):
+    mock_embed.return_value = np.array([0.1] * 768, dtype=np.float32)
+
+    mock_index = MagicMock()
+    mock_index.ntotal = 2
+    mock_vector_store.index = mock_index
+    mock_vector_store.metadata = []
+
+    # filter_search is present on the mock
+    mock_vector_store.filter_search.return_value = [
+        {"score": 0.9, "text": "filtered", "source": "s1", "repo": "r", "bundle": "b"}
+    ]
+
+    results = engine.retrieve("query", top_k=5, bundle="b")
+    mock_vector_store.filter_search.assert_called_once()
+    assert results[0]["text"] == "filtered"
+
+
+@patch("rag.engine.ollama_embed")
+def test_engine_retrieve_with_repo_filter(mock_embed, engine, mock_vector_store):
+    mock_embed.return_value = np.array([0.1] * 768, dtype=np.float32)
+
+    mock_index = MagicMock()
+    mock_index.ntotal = 1
+    mock_vector_store.index = mock_index
+    mock_vector_store.metadata = []
+    mock_vector_store.filter_search.return_value = [
+        {"score": 0.8, "text": "repo-result", "source": "s2", "repo": "my-repo", "bundle": None}
+    ]
+
+    results = engine.retrieve("query", repo="my-repo")
+    # Should call filter_search with field="repo"
+    call_kwargs = mock_vector_store.filter_search.call_args
+    assert call_kwargs[1].get("field") == "repo" or call_kwargs[0][2] == "repo"
+    assert results[0]["text"] == "repo-result"
+
+
+@patch("rag.engine.ollama_embed")
+def test_engine_retrieve_bundle_takes_priority_over_repo(mock_embed, engine, mock_vector_store):
+    mock_embed.return_value = np.array([0.1] * 768, dtype=np.float32)
+
+    mock_index = MagicMock()
+    mock_index.ntotal = 1
+    mock_vector_store.index = mock_index
+    mock_vector_store.metadata = []
+    mock_vector_store.filter_search.return_value = []
+
+    engine.retrieve("query", repo="r", bundle="b")
+    call_kwargs = mock_vector_store.filter_search.call_args
+    # bundle takes priority — field should be "bundle"
+    args = call_kwargs[0]
+    kwargs = call_kwargs[1]
+    field_used = kwargs.get("field") or (args[2] if len(args) > 2 else None)
+    assert field_used == "bundle"
+
+
+@patch("rag.engine.ollama_embed")
+def test_engine_answer_passes_scope(mock_embed, engine, mock_vector_store):
+    mock_embed.return_value = np.array([0.1] * 768, dtype=np.float32)
+
+    with patch.object(engine, "retrieve", return_value=[]) as mock_retrieve:
+        with patch("rag.engine.ollama_generate", return_value="ans"):
+            engine.answer("q", repo="r", bundle="b")
+            mock_retrieve.assert_called_once_with("q", repo="r", bundle="b")

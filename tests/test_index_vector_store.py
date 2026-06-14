@@ -139,3 +139,106 @@ def test_load_success(vs):
     assert vs.dim == 768
     assert vs.metadata == saved_data["metadata"]
     assert vs.index is mock_loaded_index
+
+
+# ------------------------------------------------------------------
+# filter_search
+# ------------------------------------------------------------------
+
+def _vs_with_metadata(metadata):
+    """Return a VectorStore wired with a mock index and given metadata."""
+    v = VectorStore()
+    v.dim = 768
+    mock_idx = MagicMock()
+    mock_idx.ntotal = len(metadata)
+    # Return scores/indices covering all rows
+    scores = np.array([[1.0 - i * 0.1 for i in range(len(metadata))]])
+    indices = np.array([[i for i in range(len(metadata))]])
+    mock_idx.search.return_value = (scores, indices)
+    v.index = mock_idx
+    v.metadata = metadata
+    return v
+
+
+def test_filter_search_no_filter_delegates_to_search(vs):
+    vs.dim = 768
+    mock_idx = MagicMock()
+    mock_idx.ntotal = 1
+    mock_idx.search.return_value = (np.array([[0.9]]), np.array([[0]]))
+    vs.index = mock_idx
+    vs.metadata = [{"text": "t1", "source": "s1"}]
+
+    # No field/value → behaves like search()
+    res = vs.filter_search([0.1] * 768)
+    assert len(res) == 1
+    assert res[0]["text"] == "t1"
+
+
+def test_filter_search_empty_index(vs):
+    assert vs.filter_search([0.1] * 768, field="bundle", value="x") == []
+
+
+def test_filter_search_by_bundle(vs):
+    meta = [
+        {"text": "t1", "source": "s1", "repo": "repo-a", "bundle": "bx"},
+        {"text": "t2", "source": "s2", "repo": "repo-a", "bundle": "by"},
+        {"text": "t3", "source": "s3", "repo": "repo-b", "bundle": "bx"},
+    ]
+    v = _vs_with_metadata(meta)
+    res = v.filter_search([0.1] * 768, top_k=5, field="bundle", value="bx")
+    assert len(res) == 2
+    texts = [r["text"] for r in res]
+    assert "t1" in texts
+    assert "t3" in texts
+    assert "t2" not in texts
+
+
+def test_filter_search_by_repo(vs):
+    meta = [
+        {"text": "t1", "source": "s1", "repo": "repo-a", "bundle": "bx"},
+        {"text": "t2", "source": "s2", "repo": "repo-b", "bundle": "bx"},
+    ]
+    v = _vs_with_metadata(meta)
+    res = v.filter_search([0.1] * 768, top_k=5, field="repo", value="repo-a")
+    assert len(res) == 1
+    assert res[0]["text"] == "t1"
+
+
+def test_filter_search_respects_top_k(vs):
+    meta = [{"text": f"t{i}", "source": f"s{i}", "repo": "r", "bundle": "b"} for i in range(10)]
+    v = _vs_with_metadata(meta)
+    res = v.filter_search([0.1] * 768, top_k=3, field="bundle", value="b")
+    assert len(res) == 3
+
+
+def test_filter_search_no_matches_returns_empty(vs):
+    meta = [{"text": "t1", "source": "s1", "repo": "repo-a", "bundle": "bx"}]
+    v = _vs_with_metadata(meta)
+    res = v.filter_search([0.1] * 768, top_k=5, field="bundle", value="nonexistent")
+    assert res == []
+
+
+def test_filter_search_returns_repo_and_bundle_fields(vs):
+    meta = [{"text": "t1", "source": "s1", "repo": "my-repo", "bundle": "my-bundle"}]
+    v = _vs_with_metadata(meta)
+    res = v.filter_search([0.1] * 768, top_k=1, field="bundle", value="my-bundle")
+    assert len(res) == 1
+    assert res[0]["repo"] == "my-repo"
+    assert res[0]["bundle"] == "my-bundle"
+
+
+def test_filter_search_dim_mismatch_raises(vs):
+    vs.dim = 768
+    vs.index = MagicMock()
+    vs.index.ntotal = 1
+    with pytest.raises(ValueError, match="Query dimension mismatch"):
+        vs.filter_search([0.1] * 512, field="bundle", value="x")
+
+
+def test_filter_search_skips_invalid_indices(vs):
+    meta = [{"text": "t1", "source": "s1", "bundle": "bx"}]
+    v = _vs_with_metadata(meta)
+    # Inject an out-of-range index into the mock search result
+    v.index.search.return_value = (np.array([[0.9, 0.8]]), np.array([[0, 99]]))
+    res = v.filter_search([0.1] * 768, top_k=5, field="bundle", value="bx")
+    assert len(res) == 1  # idx 99 is skipped
