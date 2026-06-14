@@ -258,9 +258,9 @@ Expected output:
 ⚠️  2 repos not found, will be skipped: ['omnibioai-security-audit', 'omnibioai-hpc-policy-engine']
 📄 Loaded N documents
 ...
-💾 Index saved to .../data/faiss_index (2067 vectors)
+💾 Index saved to .../data/faiss_index (10877 vectors)
 ✅ V6 Index Complete
-{'too_short': 3, 'deduped': 10, 'embed_failed': 0, 'new': 2067, 'chunks_indexed': 2067}
+{'too_short': 4, 'deduped': 31, 'embed_failed': 4, 'new': 10881, 'chunks_indexed': 10877}
 ```
 
 ### How deduplication works
@@ -293,18 +293,23 @@ This excludes `omnibioai/work/` which contains UUID-named runtime copies of work
 
 # Current Index Stats
 
-As of 2026-06-13 (third full rebuild):
+As of 2026-06-14 (Phase 2 rebuild — markdown-aware chunker):
 
 | Metric | Value |
 |--------|-------|
-| Total vectors | 2,067 |
+| Total vectors | 10,877 |
 | Unique source files | ~965 |
 | Repos indexed | 17 of 19 |
 | Workflow bundles covered | 50 / 50 |
-| Chunks filtered (too short) | 3 |
-| Cross-repo deduped | 10 |
+| Chunks filtered (too short) | 4 |
+| Cross-repo deduped | 31 |
+| **Recall@5 (eval set)** | **96% (24/25)** |
+
+**Chunking strategy:** Markdown-structure-aware — splits on H1/H2/H3 headers as natural section boundaries, never splits inside fenced code blocks, falls back to paragraph boundaries (`\n\n`) for long sections, and word-boundary splitting for oversized paragraphs. Each chunk is prefixed with its ancestor header breadcrumb (e.g. `# ATACseq Pipeline > ## Parameters`) so retrieval context carries section identity. Previous fixed 500-word window chunker produced 2,067 vectors; the markdown chunker produces 10,877 (5.3× more granular chunks).
 
 Missing repos (not present on disk): `omnibioai-security-audit`, `omnibioai-hpc-policy-engine`. The indexer skips them with a warning and continues.
+
+> **Note:** `data/faiss_index/` is excluded from git (see `.gitignore`). Regenerate with `python scripts/build_index.py`.
 
 ---
 

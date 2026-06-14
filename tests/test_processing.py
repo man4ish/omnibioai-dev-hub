@@ -1,9 +1,16 @@
 from processing.chunker import chunk_text
 
-def test_chunk_text():
-    text = "a b c d e f"
-    chunks = chunk_text(text, chunk_size=2)
-    assert len(chunks) == 3
-    assert chunks[0] == "a b"
-    assert chunks[1] == "c d"
-    assert chunks[2] == "e f"
+
+def test_chunk_text_plain():
+    # Plain text with no headers is returned as a single chunk
+    text = "hello world foo bar"
+    chunks = chunk_text(text)
+    assert len(chunks) == 1
+    assert chunks[0] == text
+
+
+def test_chunk_text_accepts_chunk_size_kwarg():
+    # chunk_size is kept for API compatibility and must not raise
+    result = chunk_text("some text", chunk_size=2)
+    assert isinstance(result, list)
+    assert len(result) == 1

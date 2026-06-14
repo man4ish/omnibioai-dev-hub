@@ -1,0 +1,127 @@
+[
+  {
+    "query": "what are the processing steps in the ATAC-seq pipeline from raw reads to peak calls",
+    "expected_source_contains": "omnibioai-workflow-bundles/atacseq",
+    "notes": "ATAC-seq README describes FASTQ→FastQC→BWA→BAM Filtering→MACS2 step sequence"
+  },
+  {
+    "query": "how does the chipseq workflow bundle wrap nf-core pipelines for CUT&RUN and CUT&Tag",
+    "expected_source_contains": "omnibioai-workflow-bundles/chipseq",
+    "notes": "ChIP-seq bundle is a thin orchestration wrapper around nf-core/chipseq"
+  },
+  {
+    "query": "what are the required input parameters for the RNA-seq count matrix QC workflow",
+    "expected_source_contains": "omnibioai-workflow-bundles/rnaseq/count_matrix_qc",
+    "notes": "count_matrix_qc README lists WDL-style input parameters including CountMatrixQc.input_file"
+  },
+  {
+    "query": "how does the GATK germline variant calling nextflow workflow support single and multi-sample cohort execution",
+    "expected_source_contains": "omnibioai-workflow-bundles/wgs",
+    "notes": "WGS GATK bundle README describes single-sample and cohort modes with JSON input"
+  },
+  {
+    "query": "which CYP enzyme star alleles does the pharmacogenomics pipeline call to predict drug metabolism",
+    "expected_source_contains": "omnibioai-workflow-bundles/pharmacogenomics",
+    "notes": "pharmacogenomics README lists CYP2D6, CYP2C19, CYP2C9, CYP3A5, NAT2 star allele calling"
+  },
+  {
+    "query": "what input files are required for the HLA typing pipeline for neoantigen discovery",
+    "expected_source_contains": "omnibioai-workflow-bundles/hla_typing",
+    "notes": "HLA typing README specifies samplesheet CSV with fastq_1, fastq_2 and hla_reference database"
+  },
+  {
+    "query": "what pipeline steps does the GWAS workflow run using PLINK2 and REGENIE",
+    "expected_source_contains": "omnibioai-workflow-bundles/funcgen/gwas_pipeline",
+    "notes": "funcgen/gwas_pipeline README lists PLINK_QC, REGENIE, MANHATTAN, ANNOTATE steps"
+  },
+  {
+    "query": "what tools does the long-read structural variant calling workflow use to merge and annotate SVs",
+    "expected_source_contains": "omnibioai-workflow-bundles/longread/longread_sv",
+    "notes": "longread_sv README lists Sniffles2, PBSV, SURVIVOR_MERGE, and ANNOTATE_SV steps"
+  },
+  {
+    "query": "how does the metagenomics pipeline perform shotgun taxonomic profiling with Kraken2 and Bracken",
+    "expected_source_contains": "omnibioai-workflow-bundles/metagenomics",
+    "notes": "metagenomics README describes FASTQC→Kraken2→Bracken→MultiQC pipeline flow"
+  },
+  {
+    "query": "how does the Kraken classification workflow classify metagenomic reads taxonomically",
+    "expected_source_contains": "omnibioai-workflow-bundles/microbiome/kraken_classification",
+    "notes": "kraken_classification README explains k-mer based classification against RefSeq before Bracken"
+  },
+  {
+    "query": "how do you run Space Ranger count for 10x Visium spatial transcriptomics with multiple FASTQ lanes",
+    "expected_source_contains": "omnibioai-workflow-bundles/spatial/spaceranger_visium_count",
+    "notes": "spaceranger_visium_count bundle supports comma-separated multi-lane FASTQ directories"
+  },
+  {
+    "query": "which cell segmentation models does the IMC segmentation workflow use for imaging mass cytometry",
+    "expected_source_contains": "omnibioai-workflow-bundles/spatial/imc_segmentation",
+    "notes": "imc_segmentation README mentions Cellpose and DeepCell models"
+  },
+  {
+    "query": "what input matrices are required for the multi-omics integration pipeline using MOFA and WNN",
+    "expected_source_contains": "omnibioai-workflow-bundles/multimodal_integration",
+    "notes": "multimodal_integration README lists rna_matrix, atac_matrix, protein_matrix, clinical_data inputs"
+  },
+  {
+    "query": "which tools does the gene regulatory network multiomics workflow use to build eGRNs from single-cell ATAC and RNA data",
+    "expected_source_contains": "omnibioai-workflow-bundles/multimodal/gene_regulatory_networks",
+    "notes": "GRN workflow uses SCENIC+, CellOracle, Pando, FigR, DIRECT-NET, TRIPOD, scMEGA"
+  },
+  {
+    "query": "how does the peptide identification workflow perform protein identification from MS/MS tandem mass spectra",
+    "expected_source_contains": "omnibioai-workflow-bundles/proteomics/peptide_identification",
+    "notes": "peptide_identification README describes database searching, spectral library matching, FDR estimation"
+  },
+  {
+    "query": "what parameters does the flow cytometry compensation workflow require for CyTOF data transformation",
+    "expected_source_contains": "omnibioai-workflow-bundles/singlecell/flow_cytometry_comp",
+    "notes": "flow_cytometry_comp README lists FlowCytometryComp.sample_id and input_file parameters"
+  },
+  {
+    "query": "what immune repertoire diversity metrics does the VDJtools analysis workflow calculate",
+    "expected_source_contains": "omnibioai-workflow-bundles/singlecell/vdjtools_analysis",
+    "notes": "VDJtools README describes diversity metrics, shared clonotype finding, and clonal dynamics tracking"
+  },
+  {
+    "query": "which aligners are supported for CLIP-seq read alignment in the CLIP alignment workflow",
+    "expected_source_contains": "omnibioai-workflow-bundles/epigenomics/clip_alignment",
+    "notes": "clip_alignment README mentions STAR and bowtie2 with ENCODE-compatible filters"
+  },
+  {
+    "query": "how does the CRISPR ML pipeline predict guide RNA efficiency and rank guides by off-target risk",
+    "expected_source_contains": "omnibioai-workflow-bundles/crispr_ml",
+    "notes": "crispr_ml README describes k-mer feature encoding, efficiency model, off-target estimator, ranking"
+  },
+  {
+    "query": "what query parameters does the GEO search plugin accept for filtering NCBI GEO datasets by organism",
+    "expected_source_contains": "omnibioai/plugins/geo_search",
+    "notes": "geo_search plugin README lists query, organism, experiment_type, max_results parameters"
+  },
+  {
+    "query": "what modules are included in the integrated epigenomics pipeline that combines ChIP-seq and ATAC-seq analysis",
+    "expected_source_contains": "omnibioai-workflow-bundles/epigenomics",
+    "notes": "epigenomics bundle README lists peak_calling, chromatin_state, enhancer_prediction, report modules"
+  },
+  {
+    "query": "how do you validate the omni-tool-runtime execution contract on Kubernetes using Minikube",
+    "expected_source_contains": "omnibioai-tool-runtime",
+    "notes": "tool-runtime Kubernetes smoke test doc describes minimal validation of container execution via RESULT_URI"
+  },
+  {
+    "query": "what does the OmniBioAI model registry provide for immutable versioning and staged promotion of ML models",
+    "expected_source_contains": "omnibioai-model-registry",
+    "notes": "model-registry README covers write-once versioning, SHA256 integrity, latest→staging→production promotion"
+  },
+  {
+    "query": "what quality control checks does the variant QC filtering plugin apply to genomic VCF files before downstream analysis",
+    "expected_source_contains": "omnibioai/plugins/variant_qc_filtering",
+    "notes": "variant_qc_filtering README describes format-level and evidence-level sanity checks as Stage-1 QC gate"
+  },
+  {
+    "query": "how does the clinical trial matching pipeline score and rank patients against trial eligibility criteria",
+    "expected_source_contains": "omnibioai-workflow-bundles/clinical_trial_matching",
+    "notes": "clinical_trial_matching README describes genomic biomarker matching, eligibility scoring, HTML report generation"
+  }
+]
