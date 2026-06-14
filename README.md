@@ -195,13 +195,10 @@ conda activate omnibioai-dev-hub
 ## Install Dependencies
 
 ```bash
-pip install fastapi uvicorn requests numpy faiss-cpu
+pip install fastapi uvicorn requests numpy faiss-cpu sentence-transformers
 ```
 
-> `sentence-transformers` is only required to run the test suite (`tests/test_embeddings.py`, `tests/test_retriever.py`). It is not needed to run the server or build the index:
-> ```bash
-> pip install sentence-transformers  # tests only
-> ```
+> `sentence-transformers` is required for cross-encoder reranking (`rerank=True` in `retrieve()`). It is also used by the test suite. If reranking is not needed you can omit it — the engine degrades gracefully to FAISS order when the model is unavailable.
 
 ---
 
@@ -293,7 +290,7 @@ This excludes `omnibioai/work/` which contains UUID-named runtime copies of work
 
 # Current Index Stats
 
-As of 2026-06-14 (Phase 2 rebuild — markdown-aware chunker):
+As of 2026-06-14 (Phase 3 — metadata filtering + cross-encoder reranking):
 
 | Metric | Value |
 |--------|-------|
@@ -303,9 +300,14 @@ As of 2026-06-14 (Phase 2 rebuild — markdown-aware chunker):
 | Workflow bundles covered | 50 / 50 |
 | Chunks filtered (too short) | 4 |
 | Cross-repo deduped | 31 |
-| **Recall@5 (eval set)** | **96% (24/25)** |
+| **Recall@5 (eval set)** | **96.8% (30/31)** |
+| Eval set size | 31 queries |
+
+**Chunk metadata fields:** Each indexed chunk carries `text`, `source`, `hash`, `repo` (basename of the containing repository directory), and `bundle` (first subdirectory under the repo root, or `None` for root-level files). The `repo` and `bundle` fields enable post-filtered scoped queries that restrict FAISS candidates to a specific repository or workflow bundle.
 
 **Chunking strategy:** Markdown-structure-aware — splits on H1/H2/H3 headers as natural section boundaries, never splits inside fenced code blocks, falls back to paragraph boundaries (`\n\n`) for long sections, and word-boundary splitting for oversized paragraphs. Each chunk is prefixed with its ancestor header breadcrumb (e.g. `# ATACseq Pipeline > ## Parameters`) so retrieval context carries section identity. Previous fixed 500-word window chunker produced 2,067 vectors; the markdown chunker produces 10,877 (5.3× more granular chunks).
+
+**Remaining failure:** The one unscoped failure (metagenomics shotgun profiling vs. microbiome/kraken sub-workflows) passes with either `bundle="metagenomics"` scoped filtering or `rerank=True` cross-encoder reranking.
 
 Missing repos (not present on disk): `omnibioai-security-audit`, `omnibioai-hpc-policy-engine`. The indexer skips them with a warning and continues.
 
@@ -351,6 +353,25 @@ Example response:
 
 ---
 
+## Scoped Queries
+
+Both `/rag/query` and `/rag/stream` accept optional `repo` and `bundle` parameters to post-filter FAISS candidates to a specific repository or workflow bundle:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `repo` | `string` (optional) | Restrict results to chunks from this repository (e.g. `"omnibioai-model-registry"`) |
+| `bundle` | `string` (optional) | Restrict results to chunks from this workflow bundle subdirectory (e.g. `"metagenomics"`) |
+
+When both are provided, `bundle` takes priority. Omitting both parameters performs a global unscoped search.
+
+```bash
+curl -X POST http://localhost:8082/rag/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "shotgun profiling steps", "bundle": "metagenomics"}'
+```
+
+---
+
 # Streaming API
 
 Endpoint:
@@ -359,7 +380,7 @@ Endpoint:
 POST /rag/stream
 ```
 
-Body: `{"query": "your question"}`
+Body: `{"query": "your question"}` — also accepts optional `repo` and `bundle` parameters (same semantics as `/rag/query`).
 
 ### How it works
 
@@ -396,6 +417,30 @@ ragStream(
 ```
 
 The UI client (`src/api/client.ts`) parses the `data:` envelope and dispatches `type: "token"` and `type: "done"` events.
+
+---
+
+# Reranking
+
+## Cross-Encoder Reranking
+
+The retrieval pipeline supports optional cross-encoder reranking:
+
+```python
+docs = engine.retrieve(query, top_k=5, rerank=True)
+```
+
+**Model:** `cross-encoder/ms-marco-MiniLM-L-6-v2` (via `sentence-transformers`)
+
+**How it works:**
+
+1. FAISS retrieves `top_k × 3` candidates (15 for the default `top_k=5`).
+2. The cross-encoder scores each `(query, chunk)` pair jointly, capturing fine-grained relevance that the bi-encoder embedding alone misses.
+3. The top `top_k` by cross-encoder score are returned, each with a `ce_score` field attached.
+
+**Graceful degradation:** If `sentence-transformers` is not installed or the model fails to load, `rerank()` logs a warning and falls back to the original FAISS order silently. No code change needed.
+
+**When to use:** Unscoped queries where semantic collision is likely — for example, when a broad term (e.g. "Kraken2") matches many sub-workflow chunks and the pipeline overview you actually want is pushed below rank 5. For narrowly scoped queries (with `repo` or `bundle`), the candidate pool is already restricted and reranking adds latency with little benefit.
 
 ---
 
@@ -594,10 +639,8 @@ Expected: `ntotal: 2067` (or your current count).
 
 * Chunker word-boundary snapping
 * IVF or HNSW indexes for million-scale corpora
-* BM25 hybrid search
-* Metadata filtering (by repo, file type, date)
-* Cross-encoder reranking
-* Distributed / incremental index updates
+* Hybrid BM25 + vector search
+* Persistent storage and distributed / incremental index updates
 * Graph RAG (graph store already seeded)
 * Plugin-aware retrieval
 
