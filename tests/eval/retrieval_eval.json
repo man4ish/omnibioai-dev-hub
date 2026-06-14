@@ -153,5 +153,11 @@
     "expected_source_contains": "omnibioai-workflow-bundles/epigenomics/clip_alignment",
     "bundle": "epigenomics",
     "notes": "scoped to epigenomics bundle — CLIP-seq alignment terms can match general RNA-seq alignment docs"
+  },
+  {
+    "query": "how does the metagenomics pipeline perform shotgun taxonomic profiling with Kraken2 and Bracken",
+    "expected_source_contains": "omnibioai-workflow-bundles/metagenomics",
+    "rerank": true,
+    "notes": "unscoped rerank test — this query fails at rank 6+ without reranking; cross-encoder should promote metagenomics/README above microbiome/kraken sub-workflows"
   }
 ]

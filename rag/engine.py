@@ -1,8 +1,29 @@
 import os
 import json
+import logging
 import requests
 import numpy as np
-from typing import Generator, List, Dict, Any
+from typing import Generator, List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+# =========================================================
+# CROSS-ENCODER (lazy import — optional dependency)
+# =========================================================
+_CROSS_ENCODER = None
+_CE_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+def _get_cross_encoder():
+    global _CROSS_ENCODER
+    if _CROSS_ENCODER is None:
+        try:
+            from sentence_transformers import CrossEncoder
+            _CROSS_ENCODER = CrossEncoder(_CE_MODEL, device="cpu")
+            logger.info(f"CrossEncoder loaded: {_CE_MODEL}")
+        except Exception as e:
+            logger.warning(f"CrossEncoder unavailable ({e}); reranking will be skipped")
+            _CROSS_ENCODER = False  # sentinel: tried and failed
+    return _CROSS_ENCODER if _CROSS_ENCODER is not False else None
 
 
 # =========================================================
@@ -101,9 +122,39 @@ class RAGEngine:
         return vec
 
     # =====================================================
+    # CROSS-ENCODER RERANKING
+    # =====================================================
+    def rerank(self, query: str, docs: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
+        """Re-order docs by cross-encoder relevance score.
+
+        Returns the top_k highest-scoring docs.  Falls back to the original
+        FAISS order if the cross-encoder model cannot be loaded.
+        """
+        if not docs:
+            return docs
+
+        ce = _get_cross_encoder()
+        if ce is None:
+            logger.warning("rerank() called but CrossEncoder is unavailable; returning FAISS order")
+            return docs[:top_k]
+
+        pairs = [(query, d.get("text", "")) for d in docs]
+        scores = ce.predict(pairs)
+
+        ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
+        reranked = [d for _, d in ranked[:top_k]]
+
+        # Attach cross-encoder score for transparency
+        for score, doc in zip([s for s, _ in ranked[:top_k]], reranked):
+            doc["ce_score"] = float(score)
+
+        return reranked
+
+    # =====================================================
     # RETRIEVAL (FAISS ONLY)
     # =====================================================
-    def retrieve(self, query: str, top_k: int = 5, repo: str = None, bundle: str = None):
+    def retrieve(self, query: str, top_k: int = 5, repo: str = None, bundle: str = None,
+                 rerank: bool = False):
 
         query_vec = self._embed(query).reshape(1, -1)
 
@@ -114,28 +165,32 @@ class RAGEngine:
         if index is None or index.ntotal == 0:
             return []
 
+        # When reranking, fetch a wider candidate set for the cross-encoder to score
+        fetch_k = top_k * 3 if rerank else top_k
+
         # Route through filter_search when a scope is requested
         if (repo is not None or bundle is not None) and hasattr(vs, "filter_search"):
             field = "bundle" if bundle is not None else "repo"
             value = bundle if bundle is not None else repo
-            return vs.filter_search(query_vec, top_k, field=field, value=value)
+            candidates = vs.filter_search(query_vec, fetch_k, field=field, value=value)
+        else:
+            k = min(fetch_k, index.ntotal)
+            scores, indices = index.search(query_vec, k)
 
-        scores, indices = index.search(query_vec, top_k)
+            candidates = []
+            for score, idx in zip(scores[0], indices[0]):
+                if idx < 0 or idx >= len(metadata):
+                    continue
+                candidates.append({
+                    "score": float(score),
+                    "text": metadata[idx].get("text", ""),
+                    "source": metadata[idx].get("source", "unknown")
+                })
 
-        results = []
+        if rerank:
+            return self.rerank(query, candidates, top_k=top_k)
 
-        for score, idx in zip(scores[0], indices[0]):
-
-            if idx < 0 or idx >= len(metadata):
-                continue
-
-            results.append({
-                "score": float(score),
-                "text": metadata[idx].get("text", ""),
-                "source": metadata[idx].get("source", "unknown")
-            })
-
-        return results
+        return candidates
 
     # =====================================================
     # CONTEXT BUILDER

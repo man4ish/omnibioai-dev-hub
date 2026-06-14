@@ -2,6 +2,7 @@ import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
 from rag.engine import RAGEngine, ollama_embed, ollama_generate, cosine
+import rag.engine as _engine_mod
 
 # =========================================================
 # UNIT TESTS FOR ollama_embed
@@ -257,3 +258,139 @@ def test_engine_answer_passes_scope(mock_embed, engine, mock_vector_store):
         with patch("rag.engine.ollama_generate", return_value="ans"):
             engine.answer("q", repo="r", bundle="b")
             mock_retrieve.assert_called_once_with("q", repo="r", bundle="b")
+
+
+# =========================================================
+# RERANKING TESTS
+# =========================================================
+
+# =========================================================
+# _get_cross_encoder — unit tests for the lazy-loader
+# =========================================================
+
+def test_get_cross_encoder_returns_cached_instance():
+    old = _engine_mod._CROSS_ENCODER
+    sentinel = MagicMock()
+    _engine_mod._CROSS_ENCODER = sentinel
+    try:
+        assert _engine_mod._get_cross_encoder() is sentinel
+    finally:
+        _engine_mod._CROSS_ENCODER = old
+
+
+def test_get_cross_encoder_false_sentinel_returns_none():
+    old = _engine_mod._CROSS_ENCODER
+    _engine_mod._CROSS_ENCODER = False
+    try:
+        assert _engine_mod._get_cross_encoder() is None
+    finally:
+        _engine_mod._CROSS_ENCODER = old
+
+
+def test_get_cross_encoder_loads_on_first_call():
+    old = _engine_mod._CROSS_ENCODER
+    _engine_mod._CROSS_ENCODER = None
+    mock_ce_instance = MagicMock()
+    mock_st = MagicMock()
+    mock_st.CrossEncoder = MagicMock(return_value=mock_ce_instance)
+    try:
+        with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
+            result = _engine_mod._get_cross_encoder()
+        assert result is mock_ce_instance
+    finally:
+        _engine_mod._CROSS_ENCODER = old
+
+
+def test_get_cross_encoder_handles_import_failure():
+    old = _engine_mod._CROSS_ENCODER
+    _engine_mod._CROSS_ENCODER = None
+    try:
+        with patch.dict("sys.modules", {"sentence_transformers": None}):
+            result = _engine_mod._get_cross_encoder()
+        assert result is None
+        assert _engine_mod._CROSS_ENCODER is False
+    finally:
+        _engine_mod._CROSS_ENCODER = old
+
+
+# =========================================================
+# RERANKING TESTS
+# =========================================================
+
+def test_rerank_empty_docs_returns_empty(engine):
+    assert engine.rerank("q", [], top_k=5) == []
+
+
+def test_rerank_returns_top_k(engine):
+    docs = [{"text": f"doc{i}", "source": f"s{i}", "score": float(i)} for i in range(10)]
+    mock_ce = MagicMock()
+    # Assign descending scores so doc9 ranks highest
+    mock_ce.predict.return_value = [float(i) for i in range(10)]
+
+    with patch("rag.engine._get_cross_encoder", return_value=mock_ce):
+        result = engine.rerank("query", docs, top_k=3)
+
+    assert len(result) == 3
+    assert result[0]["text"] == "doc9"  # highest CE score
+
+
+def test_rerank_attaches_ce_score(engine):
+    docs = [{"text": "a", "source": "s1"}, {"text": "b", "source": "s2"}]
+    mock_ce = MagicMock()
+    mock_ce.predict.return_value = [0.3, 0.9]
+
+    with patch("rag.engine._get_cross_encoder", return_value=mock_ce):
+        result = engine.rerank("q", docs, top_k=2)
+
+    assert "ce_score" in result[0]
+    assert result[0]["ce_score"] > result[1]["ce_score"]
+
+
+def test_rerank_falls_back_when_ce_unavailable(engine):
+    docs = [{"text": "x", "source": "s"}]
+    with patch("rag.engine._get_cross_encoder", return_value=None):
+        result = engine.rerank("q", docs, top_k=5)
+    assert result == docs  # unchanged
+
+
+@patch("rag.engine.ollama_embed")
+def test_retrieve_with_rerank_fetches_wider_set(mock_embed, engine, mock_vector_store):
+    mock_embed.return_value = np.array([0.1] * 768, dtype=np.float32)
+
+    mock_index = MagicMock()
+    mock_index.ntotal = 20
+    mock_index.search.return_value = (
+        np.array([[0.9] * 15]),
+        np.array([[i for i in range(15)]])
+    )
+    mock_vector_store.index = mock_index
+    mock_vector_store.metadata = [
+        {"text": f"t{i}", "source": f"s{i}"} for i in range(20)
+    ]
+
+    mock_ce = MagicMock()
+    mock_ce.predict.return_value = list(range(15))  # ascending scores
+
+    with patch("rag.engine._get_cross_encoder", return_value=mock_ce):
+        result = engine.retrieve("q", top_k=5, rerank=True)
+
+    # With top_k=5 and rerank=True, FAISS was searched with k=15 (5*3)
+    call_args = mock_index.search.call_args
+    assert call_args[0][1] == 15  # fetch_k = top_k * 3
+    assert len(result) == 5
+
+
+@patch("rag.engine.ollama_embed")
+def test_retrieve_without_rerank_fetches_exact_top_k(mock_embed, engine, mock_vector_store):
+    mock_embed.return_value = np.array([0.1] * 768, dtype=np.float32)
+
+    mock_index = MagicMock()
+    mock_index.ntotal = 20
+    mock_index.search.return_value = (np.array([[0.9] * 5]), np.array([[i for i in range(5)]]))
+    mock_vector_store.index = mock_index
+    mock_vector_store.metadata = [{"text": f"t{i}", "source": f"s{i}"} for i in range(20)]
+
+    engine.retrieve("q", top_k=5, rerank=False)
+
+    call_args = mock_index.search.call_args
+    assert call_args[0][1] == 5  # exact top_k, no multiplier

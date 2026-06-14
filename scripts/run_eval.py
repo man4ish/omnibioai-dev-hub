@@ -55,10 +55,18 @@ def run_eval(index_dir: str, eval_path: str):
         repo = case.get("repo")
         bundle = case.get("bundle")
 
-        scope_label = f"bundle={bundle}" if bundle else (f"repo={repo}" if repo else "-")
+        use_rerank = case.get("rerank", False)
+        scope_parts = []
+        if bundle:
+            scope_parts.append(f"bundle={bundle}")
+        elif repo:
+            scope_parts.append(f"repo={repo}")
+        if use_rerank:
+            scope_parts.append("rerank")
+        scope_label = ",".join(scope_parts) if scope_parts else "-"
 
         try:
-            docs = engine.retrieve(query, top_k=TOP_K, repo=repo, bundle=bundle)
+            docs = engine.retrieve(query, top_k=TOP_K, repo=repo, bundle=bundle, rerank=use_rerank)
         except Exception as e:
             label = FAIL_MARKER
             matched = f"[ERROR] {e}"
